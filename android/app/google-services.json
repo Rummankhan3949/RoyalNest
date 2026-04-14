@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "448502233028",
+    "project_id": "royalnest-d9de5",
+    "storage_bucket": "royalnest-d9de5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:448502233028:android:ab14cfddd466dfed3e5691",
+        "android_client_info": {
+          "package_name": "com.example.fyp_royalnest"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "448502233028-no6fl5si2tgrkvg4m9jnva280acvmu2a.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.fyp_royalnest",
+            "certificate_hash": "205accaba25f27d4de1b015923a78c06b5102ab6"
+          }
+        },
+        {
+          "client_id": "448502233028-dct0l4uva834r8t28svsnsh04nr5l9a5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAAqrWokRTi_9H9lFMI7YRclfu3QPIvnpo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "448502233028-dct0l4uva834r8t28svsnsh04nr5l9a5.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "448502233028-1smcm6qaqd7psaugub7m72d1edh12328.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.fypRoyalnest"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,19 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Manual payment proof uploads.
+    // Clients can upload and read their own files; admins can read all.
+    match /payment_proofs/{userId}/{propertyId}/{fileName} {
+      allow create, update, delete: if isOwner(userId);
+      allow read: if isOwner(userId);
+    }
+  }
+}
