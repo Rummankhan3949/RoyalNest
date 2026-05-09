@@ -34,6 +34,8 @@ class _AdminPaymentMethodsScreenState extends State<AdminPaymentMethodsScreen> {
     final methodCtrl = TextEditingController(text: method?.methodName ?? '');
     final titleCtrl = TextEditingController(text: method?.accountTitle ?? '');
     final numberCtrl = TextEditingController(text: method?.accountNumber ?? '');
+    final bankIdCtrl = TextEditingController(text: method?.bankId ?? '');
+    final societyCtrl = TextEditingController(text: method?.societyName ?? '');
     bool active = method?.isActive ?? true;
 
     final submit = await showDialog<bool>(
@@ -60,6 +62,16 @@ class _AdminPaymentMethodsScreenState extends State<AdminPaymentMethodsScreen> {
                   decoration: const InputDecoration(
                     labelText: 'Account Number / IBAN',
                   ),
+                ),
+                TextField(
+                  controller: bankIdCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Bank ID (shown on challan)',
+                  ),
+                ),
+                TextField(
+                  controller: societyCtrl,
+                  decoration: const InputDecoration(labelText: 'Society Name'),
                 ),
                 const SizedBox(height: 8),
                 SwitchListTile(
@@ -105,6 +117,8 @@ class _AdminPaymentMethodsScreenState extends State<AdminPaymentMethodsScreen> {
           methodName: methodCtrl.text.trim(),
           accountTitle: titleCtrl.text.trim(),
           accountNumber: numberCtrl.text.trim(),
+          bankId: bankIdCtrl.text.trim(),
+          societyName: societyCtrl.text.trim(),
           isActive: active,
           createdAt: DateTime.now(),
         ),
@@ -115,6 +129,8 @@ class _AdminPaymentMethodsScreenState extends State<AdminPaymentMethodsScreen> {
           methodName: methodCtrl.text.trim(),
           accountTitle: titleCtrl.text.trim(),
           accountNumber: numberCtrl.text.trim(),
+          bankId: bankIdCtrl.text.trim(),
+          societyName: societyCtrl.text.trim(),
           isActive: active,
           updatedAt: DateTime.now(),
         ),
@@ -237,6 +253,20 @@ class _AdminPaymentMethodsScreenState extends State<AdminPaymentMethodsScreen> {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 13),
                             ),
+                            if (method.bankId.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                'Bank ID: ${method.bankId}',
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                            ],
+                            if (method.societyName.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                'Society: ${method.societyName}',
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                            ],
                           ],
                         ),
                       ),

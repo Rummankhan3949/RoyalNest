@@ -11,6 +11,7 @@ class UserModel {
   final String? address;
   final bool isFiler;
   final bool isDocumentsVerified;
+  final bool isBlocked;
   final DateTime? createdAt;
 
   const UserModel({
@@ -23,6 +24,7 @@ class UserModel {
     this.address,
     this.isFiler = true,
     this.isDocumentsVerified = false,
+    this.isBlocked = false,
     this.createdAt,
   });
 
@@ -37,6 +39,7 @@ class UserModel {
       address: map['address'],
       isFiler: map['isFiler'] ?? true,
       isDocumentsVerified: map['isDocumentsVerified'] ?? false,
+      isBlocked: map['isBlocked'] ?? false,
       createdAt: (map['createdAt'] as Timestamp?)?.toDate(),
     );
   }
@@ -52,6 +55,7 @@ class UserModel {
       'address': address,
       'isFiler': isFiler,
       'isDocumentsVerified': isDocumentsVerified,
+      'isBlocked': isBlocked,
       'createdAt': createdAt != null
           ? Timestamp.fromDate(createdAt!)
           : FieldValue.serverTimestamp(),
@@ -68,6 +72,7 @@ class UserModel {
     String? address,
     bool? isFiler,
     bool? isDocumentsVerified,
+    bool? isBlocked,
     DateTime? createdAt,
   }) {
     return UserModel(
@@ -80,6 +85,7 @@ class UserModel {
       address: address ?? this.address,
       isFiler: isFiler ?? this.isFiler,
       isDocumentsVerified: isDocumentsVerified ?? this.isDocumentsVerified,
+      isBlocked: isBlocked ?? this.isBlocked,
       createdAt: createdAt ?? this.createdAt,
     );
   }

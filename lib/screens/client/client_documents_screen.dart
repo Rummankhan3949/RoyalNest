@@ -27,6 +27,12 @@ class _ClientDocumentsScreenState extends State<ClientDocumentsScreen> {
   File? _cnicBackImage;
   File? _filerVerificationImage;
 
+  bool _isApprovedStatus(String status) {
+    final normalized = status.toLowerCase();
+    return normalized == AppConstants.documentApproved ||
+        normalized == AppConstants.documentVerified;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -184,7 +190,7 @@ class _ClientDocumentsScreenState extends State<ClientDocumentsScreen> {
           if (document.status == AppConstants.documentRejected)
             _buildRejectionInfo(document),
           const SizedBox(height: 16),
-          if (document.status != AppConstants.documentVerified)
+          if (!_isApprovedStatus(document.status))
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -210,9 +216,10 @@ class _ClientDocumentsScreenState extends State<ClientDocumentsScreen> {
         status = 'Pending Verification';
         icon = Icons.hourglass_empty;
         break;
+      case AppConstants.documentApproved:
       case AppConstants.documentVerified:
         color = Colors.green;
-        status = 'Verified';
+        status = 'Approved';
         icon = Icons.verified;
         break;
       case AppConstants.documentRejected:
@@ -260,7 +267,7 @@ class _ClientDocumentsScreenState extends State<ClientDocumentsScreen> {
                 Text(
                   document.status == AppConstants.documentPending
                       ? 'Your documents are under review'
-                      : document.status == AppConstants.documentVerified
+                      : _isApprovedStatus(document.status)
                       ? 'All documents verified successfully'
                       : 'Please resubmit correct documents',
                   style: const TextStyle(fontSize: 13, color: Colors.grey),
@@ -628,8 +635,38 @@ class _ClientDocumentsScreenState extends State<ClientDocumentsScreen> {
                         );
 
                         try {
+                          final cnicFrontUrl = await _documentService
+                              .uploadDocumentFile(
+                                userId: userId,
+                                documentType: 'cnic_front',
+                                file: _cnicFrontImage!,
+                              );
+                          final cnicBackUrl = await _documentService
+                              .uploadDocumentFile(
+                                userId: userId,
+                                documentType: 'cnic_back',
+                                file: _cnicBackImage!,
+                              );
+
+                          String? filerDocUrl;
+                          if (isFiler && _filerVerificationImage != null) {
+                            filerDocUrl = await _documentService
+                                .uploadDocumentFile(
+                                  userId: userId,
+                                  documentType: 'filer_verification',
+                                  file: _filerVerificationImage!,
+                                );
+                          }
+
+                          if (cnicFrontUrl == null || cnicBackUrl == null) {
+                            throw Exception(
+                              'Document upload failed. Please retry.',
+                            );
+                          }
+
                           final document = DocumentModel(
                             id: '',
+                            userId: userId,
                             clientId: userId,
                             clientName:
                                 FirebaseAuth
@@ -639,29 +676,24 @@ class _ClientDocumentsScreenState extends State<ClientDocumentsScreen> {
                                 'Client',
                             clientEmail:
                                 FirebaseAuth.instance.currentUser?.email ?? '',
+                            documentUrl: cnicFrontUrl,
+                            documentType: 'cnic_front',
                             cnic: cnicController.text,
+                            cnicFrontUrl: cnicFrontUrl,
+                            cnicBackUrl: cnicBackUrl,
+                            filerDocumentUrl: filerDocUrl,
                             isFiler: isFiler,
                             ntnNumber: isFiler ? ntnController.text : null,
                             status: AppConstants.documentPending,
+                            timestamp: DateTime.now(),
                             submittedAt: DateTime.now(),
                           );
 
                           await _documentService.submitDocument(document);
 
-                          // Note: In production, you would upload images to Firebase Storage
-                          // For now, we're just storing the metadata
-
                           if (!mounted) return;
                           Navigator.of(this.context).pop(); // Close loading
-                          ScaffoldMessenger.of(this.context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Documents submitted successfully! Images saved locally. Visit office to complete verification.',
-                              ),
-                              backgroundColor: AppTheme.successColor,
-                              duration: Duration(seconds: 4),
-                            ),
-                          );
+                          _showUploadSuccessAnimation();
                         } catch (e) {
                           if (!mounted) return;
                           Navigator.of(this.context).pop(); // Close loading
@@ -686,6 +718,53 @@ class _ClientDocumentsScreenState extends State<ClientDocumentsScreen> {
           );
         },
       ),
+    );
+  }
+
+  Future<void> _showUploadSuccessAnimation() async {
+    await showGeneralDialog<void>(
+      context: context,
+      barrierLabel: 'upload-success',
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.25),
+      transitionDuration: const Duration(milliseconds: 280),
+      pageBuilder: (_, __, ___) {
+        return Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 28),
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(Icons.check_circle, color: Colors.green, size: 60),
+                SizedBox(height: 10),
+                Text(
+                  'Upload Successful',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'Your verification documents are submitted and pending admin review.',
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (_, animation, __, child) {
+        return FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.92, end: 1).animate(animation),
+            child: child,
+          ),
+        );
+      },
     );
   }
 

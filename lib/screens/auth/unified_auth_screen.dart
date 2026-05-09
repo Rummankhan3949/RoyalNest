@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/auth_service.dart';
 import '../../services/app_startup_service.dart';
@@ -21,6 +22,7 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
   _AuthAction _activeAuthAction = _AuthAction.none;
   AuthService? _authService;
   bool _isCoreReady = false;
+  DateTime? _lastBackPressedAt;
 
   // Controllers for Login
   final _loginEmailController = TextEditingController();
@@ -56,6 +58,19 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
   void initState() {
     super.initState();
     _prepareAuthCore();
+    _showPendingBlockedNotice();
+  }
+
+  Future<void> _showPendingBlockedNotice() async {
+    final notice = await AuthService().consumeBlockedNotice();
+    if (!mounted || notice == null || notice.trim().isEmpty) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _showMessage(notice, isError: true);
+    });
   }
 
   Future<void> _prepareAuthCore() async {
@@ -109,6 +124,56 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
     );
   }
 
+  String? _validateEmail(String value) {
+    final email = value.trim();
+    if (email.isEmpty) {
+      return 'Email is required';
+    }
+
+    final isValid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+    if (!isValid) {
+      return 'Please enter a valid email address';
+    }
+
+    return null;
+  }
+
+  String _errorMessageFromResult(Map<String, dynamic> result) {
+    final dynamic message = result['message'];
+    if (message is String && message.trim().isNotEmpty) {
+      return message;
+    }
+    return 'Something went wrong. Please try again.';
+  }
+
+  Future<bool> _handleBackPress() async {
+    if (_isAnyAuthLoading) {
+      _showMessage(
+        'Please wait for the current action to finish.',
+        isError: true,
+      );
+      return false;
+    }
+
+    if (!_isLogin) {
+      _toggleMode();
+      return false;
+    }
+
+    final now = DateTime.now();
+    final shouldExit =
+        _lastBackPressedAt != null &&
+        now.difference(_lastBackPressedAt!) <= const Duration(seconds: 2);
+
+    if (shouldExit) {
+      return true;
+    }
+
+    _lastBackPressedAt = now;
+    _showMessage('Press back again to close the app.');
+    return false;
+  }
+
   Future<void> _handleLogin() async {
     if (_isAnyAuthLoading) {
       return;
@@ -130,6 +195,12 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
       return;
     }
 
+    final emailError = _validateEmail(email);
+    if (emailError != null) {
+      _showMessage(emailError, isError: true);
+      return;
+    }
+
     _setActiveAuthAction(_AuthAction.login);
 
     try {
@@ -138,11 +209,11 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
       if (_authService!.isAdminCredentials(email, password)) {
         result = await _authService!.adminLogin(email, password);
         if (!result['success']) {
-          _showMessage(result['message'], isError: true);
+          _showMessage(_errorMessageFromResult(result), isError: true);
           return;
         }
 
-        _showMessage(result['message']);
+        _showMessage(_errorMessageFromResult(result));
         if (mounted) {
           Navigator.of(context).pushReplacementNamed('/admin-home');
         }
@@ -153,21 +224,23 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
       result = await _authService!.clientLogin(email, password);
 
       if (result['success']) {
-        _showMessage(result['message']);
+        _showMessage(_errorMessageFromResult(result));
         if (mounted) {
           Navigator.of(context).pushReplacementNamed('/client-main');
         }
       } else if (result['code'] == 'admin-email-restricted') {
-        _showMessage(result['message'], isError: true);
+        _showMessage(_errorMessageFromResult(result), isError: true);
       } else if (result['code'] == 'email-not-verified') {
-        _showMessage(result['message'], isError: true);
+        _showMessage(_errorMessageFromResult(result), isError: true);
         if (mounted) {
           Navigator.of(
             context,
           ).pushReplacementNamed('/verify-email', arguments: {'email': email});
         }
+      } else if (result['code'] == 'blocked') {
+        _showMessage(_errorMessageFromResult(result), isError: true);
       } else {
-        _showMessage(result['message'], isError: true);
+        _showMessage(_errorMessageFromResult(result), isError: true);
       }
     } catch (e) {
       _showMessage('Login failed. Please try again.', isError: true);
@@ -195,13 +268,26 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
     final password = _signupPasswordController.text;
     final confirmPassword = _signupConfirmPasswordController.text;
 
-    if (username.isEmpty || cnic.isEmpty || email.isEmpty || password.isEmpty) {
-      _showMessage('Please fill all fields', isError: true);
+    if (username.isEmpty ||
+        cnic.isEmpty ||
+        email.isEmpty ||
+        password.isEmpty ||
+        confirmPassword.isEmpty) {
+      _showMessage('Please fill all required fields', isError: true);
       return;
     }
 
-    if (password.length < 6) {
-      _showMessage('Password must be at least 6 characters', isError: true);
+    if (!_isStrongPassword(password)) {
+      _showMessage(
+        'Password must be at least 8 characters and include upper, lower, and a number.',
+        isError: true,
+      );
+      return;
+    }
+
+    final emailError = _validateEmail(email);
+    if (emailError != null) {
+      _showMessage(emailError, isError: true);
       return;
     }
 
@@ -227,7 +313,7 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
       );
 
       if (result['success']) {
-        _showMessage(result['message'] ?? 'Account created successfully');
+        _showMessage(_errorMessageFromResult(result));
         // Clear form fields
         _signupUsernameController.clear();
         _signupCnicController.clear();
@@ -241,7 +327,7 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
           ).pushReplacementNamed('/verify-email', arguments: {'email': email});
         }
       } else {
-        _showMessage(result['message'], isError: true);
+        _showMessage(_errorMessageFromResult(result), isError: true);
       }
     } catch (e) {
       _showMessage('Signup failed. Please try again.', isError: true);
@@ -250,62 +336,90 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
     }
   }
 
+  bool _isStrongPassword(String password) {
+    if (password.length < 8) return false;
+    final hasUpper = password.contains(RegExp(r'[A-Z]'));
+    final hasLower = password.contains(RegExp(r'[a-z]'));
+    final hasNumber = password.contains(RegExp(r'[0-9]'));
+    return hasUpper && hasLower && hasNumber;
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
+    final isSmallScreen = size.width < 360;
+    final horizontalPadding = isSmallScreen ? 16.0 : 24.0;
+    final verticalPadding = isSmallScreen ? 12.0 : 16.0;
+    final cardMaxWidth = size.width > 700 ? 520.0 : 480.0;
 
-    return Scaffold(
-      backgroundColor: AppTheme.backgroundColor,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: size.width > 600 ? 480 : double.infinity,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) {
+          return;
+        }
+
+        final shouldExit = await _handleBackPress();
+        if (shouldExit) {
+          await SystemNavigator.pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppTheme.backgroundColor,
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontalPadding,
+                vertical: verticalPadding,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (!_isCoreReady)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: const [
-                          SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Preparing secure login services...',
-                              style: TextStyle(fontSize: 12),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: size.width > 600 ? cardMaxWidth : double.infinity,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (!_isCoreReady)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: const [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             ),
-                          ),
-                        ],
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Preparing secure login services...',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    _buildHeader(),
+                    SizedBox(height: isSmallScreen ? 18 : 24),
+                    _buildAuthCard(),
+                    const SizedBox(height: 16),
+                    const Center(
+                      child: Text(
+                        'Secured login for RoyalNest clients',
+                        style: TextStyle(fontSize: 11, color: Colors.grey),
                       ),
                     ),
-                  _buildHeader(),
-                  const SizedBox(height: 24),
-                  _buildAuthCard(),
-                  const SizedBox(height: 16),
-                  const Center(
-                    child: Text(
-                      'Secured login for RoyalNest clients',
-                      style: TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -315,32 +429,33 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
   }
 
   Widget _buildHeader() {
+    final isSmall = MediaQuery.of(context).size.width < 360;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
-          width: 80,
-          height: 80,
+          width: isSmall ? 64 : 80,
+          height: isSmall ? 64 : 80,
           decoration: BoxDecoration(
             color: AppTheme.royalBlue.withValues(alpha: 0.08),
             shape: BoxShape.circle,
           ),
-          padding: const EdgeInsets.all(10),
+          padding: EdgeInsets.all(isSmall ? 8 : 10),
           child: Image.asset(
             'assets/royalnest_logo.png',
             fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => const Icon(
+            errorBuilder: (_, __, ___) => Icon(
               Icons.home_work,
-              size: 40,
+              size: isSmall ? 30 : 40,
               color: AppTheme.royalBlue,
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        const Text(
+        SizedBox(height: isSmall ? 10 : 12),
+        Text(
           'ROYAL NEST',
           style: TextStyle(
-            fontSize: 24,
+            fontSize: isSmall ? 20 : 24,
             fontWeight: FontWeight.w800,
             letterSpacing: 2,
             color: AppTheme.royalBlue,
@@ -349,7 +464,11 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
         const SizedBox(height: 4),
         Text(
           _isLogin ? 'Welcome back, login to continue' : 'Create your account',
-          style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: isSmall ? 12 : 13,
+            color: Colors.grey.shade700,
+          ),
         ),
       ],
     );
@@ -493,7 +612,7 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildTextField(
-          label: 'Username',
+          label: 'Username *',
           hint: 'Enter your username',
           controller: _signupUsernameController,
           enabled: !_isAnyAuthLoading,
@@ -501,7 +620,7 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
         ),
         const SizedBox(height: 14),
         _buildTextField(
-          label: 'CNIC',
+          label: 'CNIC *',
           hint: '1234567890123',
           controller: _signupCnicController,
           enabled: !_isAnyAuthLoading,
@@ -511,7 +630,7 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
         ),
         const SizedBox(height: 14),
         _buildTextField(
-          label: 'E-mail',
+          label: 'E-mail *',
           hint: 'Enter your email',
           controller: _signupEmailController,
           enabled: !_isAnyAuthLoading,
@@ -520,7 +639,7 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
         ),
         const SizedBox(height: 14),
         _buildTextField(
-          label: 'Password',
+          label: 'Password *',
           hint: 'Enter password',
           controller: _signupPasswordController,
           enabled: !_isAnyAuthLoading,
@@ -538,7 +657,7 @@ class _UnifiedAuthScreenState extends State<UnifiedAuthScreen> {
         ),
         const SizedBox(height: 14),
         _buildTextField(
-          label: 'Confirm Password',
+          label: 'Confirm Password *',
           hint: 'Confirm your password',
           controller: _signupConfirmPasswordController,
           enabled: !_isAnyAuthLoading,

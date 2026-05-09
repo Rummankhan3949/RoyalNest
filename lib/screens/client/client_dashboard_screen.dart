@@ -21,6 +21,63 @@ class _ClientDashboardScreenState extends State<ClientDashboardScreen> {
   final PaymentService _paymentService = PaymentService();
   String get userId => FirebaseAuth.instance.currentUser?.uid ?? '';
 
+  static const List<_OverviewAction> _overviewActions = [
+    _OverviewAction(
+      label: 'Plots',
+      icon: Icons.landscape_outlined,
+      color: AppTheme.royalBlue,
+      route: '/client-plots',
+    ),
+    _OverviewAction(
+      label: 'Payments',
+      icon: Icons.payments_outlined,
+      color: Color(0xFF2F80ED),
+      route: '/client-payments',
+    ),
+    _OverviewAction(
+      label: 'Manual Pay',
+      icon: Icons.receipt_long_outlined,
+      color: Color(0xFF00A36C),
+      route: '/client-manual-payments',
+    ),
+    _OverviewAction(
+      label: 'Queries',
+      icon: Icons.chat_bubble_outline,
+      color: Color(0xFF7B61FF),
+      route: '/client-queries',
+    ),
+    _OverviewAction(
+      label: 'Appointments',
+      icon: Icons.event_available_outlined,
+      color: Color(0xFFF2994A),
+      route: '/client-appointments',
+    ),
+    _OverviewAction(
+      label: 'Documents',
+      icon: Icons.folder_open_outlined,
+      color: Color(0xFF1E6FD9),
+      route: '/client-documents',
+    ),
+    _OverviewAction(
+      label: 'Notifications',
+      icon: Icons.notifications_none,
+      color: Color(0xFFEB5757),
+      route: '/client-notifications',
+    ),
+    _OverviewAction(
+      label: 'Profile',
+      icon: Icons.person_outline,
+      color: Color(0xFF3D5AFE),
+      route: '/client-profile',
+    ),
+    _OverviewAction(
+      label: 'AI Assistant',
+      icon: Icons.smart_toy_outlined,
+      color: Color(0xFF0F7DA0),
+      route: '/client-ai-assistant',
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -61,6 +118,8 @@ class _ClientDashboardScreenState extends State<ClientDashboardScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  _buildOverviewGrid(),
+                  const SizedBox(height: 18),
                   FutureBuilder<List<PlotModel>>(
                     future: _plotService.getClientPlots(userId).first,
                     builder: (context, snapshot) {
@@ -280,6 +339,39 @@ class _ClientDashboardScreenState extends State<ClientDashboardScreen> {
     );
   }
 
+  Widget _buildOverviewGrid() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = width < 360
+            ? 2
+            : width < 520
+            ? 3
+            : 4;
+
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.05,
+          ),
+          itemCount: _overviewActions.length,
+          itemBuilder: (context, index) {
+            final action = _overviewActions[index];
+            return _OverviewActionTile(
+              action: action,
+              index: index,
+              onTap: () => Navigator.pushNamed(context, action.route),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildStatCard(
     String label,
     String value,
@@ -479,5 +571,110 @@ class _ClientDashboardScreenState extends State<ClientDashboardScreen> {
       return 'PKR ${(amount / 1000).toStringAsFixed(2)}K';
     }
     return 'PKR ${amount.toStringAsFixed(0)}';
+  }
+}
+
+class _OverviewAction {
+  const _OverviewAction({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.route,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final String route;
+}
+
+class _OverviewActionTile extends StatefulWidget {
+  const _OverviewActionTile({
+    required this.action,
+    required this.index,
+    required this.onTap,
+  });
+
+  final _OverviewAction action;
+  final int index;
+  final VoidCallback onTap;
+
+  @override
+  State<_OverviewActionTile> createState() => _OverviewActionTileState();
+}
+
+class _OverviewActionTileState extends State<_OverviewActionTile> {
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.delayed(Duration(milliseconds: 120 + widget.index * 70), () {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final action = widget.action;
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      opacity: _visible ? 1 : 0,
+      child: AnimatedScale(
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutBack,
+        scale: _visible ? 1 : 0.94,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [action.color.withValues(alpha: 0.14), Colors.white],
+                ),
+                border: Border.all(color: action.color.withValues(alpha: 0.25)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 10,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: action.color.withValues(alpha: 0.14),
+                    ),
+                    child: Icon(action.icon, color: action.color, size: 20),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    action.label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

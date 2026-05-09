@@ -67,6 +67,12 @@ class AdminDrawer extends StatelessWidget {
                   ),
                   _buildMenuItem(
                     context,
+                    Icons.smart_toy,
+                    'AI Assistant',
+                    '/admin-ai-assistant',
+                  ),
+                  _buildMenuItem(
+                    context,
                     Icons.add_business,
                     'Plots',
                     '/admin-plots',
@@ -118,6 +124,12 @@ class AdminDrawer extends StatelessWidget {
                     Icons.people,
                     'Clients',
                     '/admin-clients',
+                  ),
+                  _buildMenuItem(
+                    context,
+                    Icons.campaign,
+                    'Events',
+                    '/admin-events',
                   ),
                   _buildMenuItem(
                     context,

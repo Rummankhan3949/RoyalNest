@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/constants/app_constants.dart';
 import '../models/user_model.dart';
@@ -12,6 +15,7 @@ class AuthService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   final SessionCacheService _sessionCacheService = SessionCacheService();
+  static const String _blockedNoticeKey = 'auth.blockedNotice';
 
   // Current user stream
   Stream<User?> get authStateChanges => _auth.authStateChanges();
@@ -139,12 +143,24 @@ class AuthService {
             .get();
 
         if (userDoc.exists) {
+          final userData = userDoc.data() ?? <String, dynamic>{};
+          final isBlocked = userData['isBlocked'] == true;
+          if (isBlocked) {
+            await _saveBlockedNotice('Your account has been blocked by admin');
+            await logout();
+            return {
+              'success': false,
+              'code': 'blocked',
+              'message': 'Your account has been blocked by admin',
+            };
+          }
+
           await _cacheSession(role: AppConstants.roleClient);
           return {
             'success': true,
             'message': 'Login successful',
             'role': AppConstants.roleClient,
-            'user': UserModel.fromMap(userDoc.data()!),
+            'user': UserModel.fromMap(userData),
           };
         } else {
           // User authenticated but no Firestore record - create one
@@ -386,7 +402,76 @@ class AuthService {
       return '/verify-email';
     }
 
-    return _isAdminUser(refreshedUser) ? '/admin-home' : '/client-main';
+    // Never auto-enter admin area on cold start; require explicit login.
+    if (_isAdminUser(refreshedUser)) {
+      await logout();
+      return '/login';
+    }
+
+    final blocked = await isCurrentUserBlocked();
+    if (blocked) {
+      await _saveBlockedNotice('Your account has been blocked by admin');
+      await logout();
+      return '/login';
+    }
+
+    return '/client-main';
+  }
+
+  Stream<UserModel?> watchCurrentUserProfile() async* {
+    final user = _auth.currentUser;
+    if (user == null) {
+      yield null;
+      return;
+    }
+
+    try {
+      await for (final doc
+          in _firestore.collection('users').doc(user.uid).snapshots()) {
+        if (!doc.exists || doc.data() == null) {
+          yield null;
+          continue;
+        }
+        yield UserModel.fromMap(doc.data()!);
+      }
+    } on FirebaseException catch (e) {
+      if (e.code == 'permission-denied') {
+        yield null;
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Future<bool> isCurrentUserBlocked() async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    return isUserBlocked(user.uid);
+  }
+
+  Future<bool> isUserBlocked(String uid) async {
+    try {
+      final doc = await _firestore.collection('users').doc(uid).get();
+      if (!doc.exists || doc.data() == null) return false;
+      return doc.data()!['isBlocked'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _saveBlockedNotice(String message) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_blockedNoticeKey, message);
+  }
+
+  Future<String?> consumeBlockedNotice() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getString(_blockedNoticeKey);
+    if (value != null && value.trim().isNotEmpty) {
+      await prefs.remove(_blockedNoticeKey);
+      return value;
+    }
+    return null;
   }
 
   /// Logout (handles both Firebase and Google)

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/claim_model.dart';
 import '../../models/lost_found_model.dart';
 import '../../services/lost_found_service.dart';
 import 'admin_drawer.dart';
@@ -49,10 +50,10 @@ class _AdminLostFoundScreenState extends State<AdminLostFoundScreen>
           unselectedLabelColor: Colors.white70,
           isScrollable: true,
           tabs: const [
-            Tab(text: 'Lost'),
-            Tab(text: 'Found'),
+            Tab(text: 'Active'),
             Tab(text: 'Claimed'),
-            Tab(text: 'Returned'),
+            Tab(text: 'Resolved'),
+            Tab(text: 'Claims'),
           ],
         ),
       ),
@@ -60,10 +61,10 @@ class _AdminLostFoundScreenState extends State<AdminLostFoundScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
-          _buildItemsList(AppConstants.itemLost),
-          _buildItemsList(AppConstants.itemFound),
+          _buildItemsList(AppConstants.itemActive),
           _buildItemsList(AppConstants.itemClaimed),
-          _buildItemsList(AppConstants.itemReturned),
+          _buildItemsList(AppConstants.itemResolved),
+          _buildClaimsList(),
         ],
       ),
     );
@@ -71,7 +72,7 @@ class _AdminLostFoundScreenState extends State<AdminLostFoundScreen>
 
   Widget _buildItemsList(String status) {
     return StreamBuilder<List<LostFoundModel>>(
-      stream: _lostFoundService.getItemsByStatus(status),
+      stream: _lostFoundService.getAllItems(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -81,7 +82,9 @@ class _AdminLostFoundScreenState extends State<AdminLostFoundScreen>
           return Center(child: Text('Error: ${snapshot.error}'));
         }
 
-        final items = snapshot.data ?? [];
+        final items = (snapshot.data ?? [])
+            .where((item) => item.lifecycleStatus == status)
+            .toList();
 
         if (items.isEmpty) {
           return Center(
@@ -181,7 +184,10 @@ class _AdminLostFoundScreenState extends State<AdminLostFoundScreen>
                         ],
                       ),
                     ),
-                    _buildStatusChip(item.status),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 280),
+                      child: _buildStatusChip(item.lifecycleStatus),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -254,25 +260,24 @@ class _AdminLostFoundScreenState extends State<AdminLostFoundScreen>
   }
 
   Widget _buildActionButtons(LostFoundModel item) {
-    switch (item.status) {
-      case AppConstants.itemLost:
-      case AppConstants.itemFound:
+    switch (item.lifecycleStatus) {
+      case AppConstants.itemActive:
         return Row(
           children: [
             Expanded(
               child: OutlinedButton(
                 style: AppTheme.outlineButtonStyle,
-                onPressed: () => _showClaimDialog(item),
-                child: const Text('Mark Claimed'),
+                onPressed: () => _contactReporter(item),
+                child: const Text('Contact Reporter'),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: ElevatedButton(
                 style: AppTheme.primaryButtonStyle,
-                onPressed: () => _contactReporter(item),
+                onPressed: () => _deleteItem(item),
                 child: const Text(
-                  'Contact',
+                  'Delete',
                   style: TextStyle(color: Colors.white),
                 ),
               ),
@@ -284,9 +289,9 @@ class _AdminLostFoundScreenState extends State<AdminLostFoundScreen>
           width: double.infinity,
           child: ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            onPressed: () => _markAsReturned(item),
+            onPressed: () => _markAsResolved(item),
             child: const Text(
-              'Mark Returned',
+              'Mark Resolved',
               style: TextStyle(color: Colors.white),
             ),
           ),
@@ -296,26 +301,122 @@ class _AdminLostFoundScreenState extends State<AdminLostFoundScreen>
     }
   }
 
+  Widget _buildClaimsList() {
+    return StreamBuilder<List<ClaimModel>>(
+      stream: _lostFoundService.getAllClaimRequests(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+
+        final claims = snapshot.data ?? [];
+        if (claims.isEmpty) {
+          return Center(
+            child: Text(
+              'No pending claim requests',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: claims.length,
+          itemBuilder: (context, index) => _buildClaimCard(claims[index]),
+        );
+      },
+    );
+  }
+
+  Widget _buildClaimCard(ClaimModel claim) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: AppTheme.cardDecoration,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Claimant: ${claim.claimantName}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            const SizedBox(height: 6),
+            Text('Item ID: ${claim.itemId}'),
+            const SizedBox(height: 6),
+            Text('Proof: ${claim.proofText}'),
+            if (claim.proofImageUrl != null && claim.proofImageUrl!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.network(
+                    claim.proofImageUrl!,
+                    height: 160,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      height: 160,
+                      color: Colors.grey.shade200,
+                      child: const Icon(Icons.broken_image),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                    ),
+                    onPressed: () => _approveClaim(claim),
+                    icon: const Icon(Icons.check, color: Colors.white),
+                    label: const Text(
+                      'Approve',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: AppTheme.outlineButtonStyle,
+                    onPressed: () => _rejectClaim(claim),
+                    icon: const Icon(Icons.close),
+                    label: const Text('Reject'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildStatusChip(String status) {
     Color color;
     String label;
 
     switch (status) {
-      case AppConstants.itemLost:
-        color = Colors.red;
-        label = 'Lost';
-        break;
-      case AppConstants.itemFound:
+      case AppConstants.itemActive:
         color = Colors.blue;
-        label = 'Found';
+        label = 'Active';
         break;
       case AppConstants.itemClaimed:
         color = Colors.orange;
         label = 'Claimed';
         break;
+      case AppConstants.itemResolved:
       case AppConstants.itemReturned:
         color = Colors.green;
-        label = 'Returned';
+        label = 'Resolved';
         break;
       default:
         color = Colors.grey;
@@ -374,87 +475,65 @@ class _AdminLostFoundScreenState extends State<AdminLostFoundScreen>
     return '${date.day}/${date.month}/${date.year}';
   }
 
-  void _showClaimDialog(LostFoundModel item) {
-    final claimerNameController = TextEditingController();
-    final claimerContactController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Mark as Claimed'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: claimerNameController,
-              decoration: AppTheme.inputDecoration(
-                hint: 'Enter claimer name',
-                label: 'Claimer Name',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: claimerContactController,
-              decoration: AppTheme.inputDecoration(
-                hint: 'Enter contact number',
-                label: 'Contact',
-              ),
-              keyboardType: TextInputType.phone,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: AppTheme.primaryButtonStyle,
-            onPressed: () async {
-              if (claimerNameController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter claimer name')),
-                );
-                return;
-              }
-              Navigator.pop(ctx);
-              await _lostFoundService.markAsClaimed(
-                item.id,
-                claimerNameController.text,
-                claimerContactController.text,
-              );
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Item marked as claimed'),
-                    backgroundColor: AppTheme.successColor,
-                  ),
-                );
-              }
-            },
-            child: const Text('Confirm', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _contactReporter(LostFoundModel item) {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('Contact: ${item.reporterContact}')));
   }
 
-  Future<void> _markAsReturned(LostFoundModel item) async {
-    await _lostFoundService.markAsReturned(item.id);
+  Future<void> _approveClaim(ClaimModel claim) async {
+    final ok = await _lostFoundService.approveClaim(
+      claimId: claim.id,
+      itemId: claim.itemId,
+      claimantUserId: claim.claimantUserId,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Claim approved successfully' : 'Failed to approve'),
+        backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
+      ),
+    );
+  }
+
+  Future<void> _rejectClaim(ClaimModel claim) async {
+    final ok = await _lostFoundService.rejectClaim(
+      claimId: claim.id,
+      claimantUserId: claim.claimantUserId,
+      itemId: claim.itemId,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Claim rejected' : 'Failed to reject'),
+        backgroundColor: ok ? Colors.orange : AppTheme.errorColor,
+      ),
+    );
+  }
+
+  Future<void> _markAsResolved(LostFoundModel item) async {
+    await _lostFoundService.updateItemStatus(
+      item.id,
+      AppConstants.itemResolved,
+    );
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Item marked as returned'),
+          content: Text('Item marked as resolved'),
           backgroundColor: AppTheme.successColor,
         ),
       );
     }
+  }
+
+  Future<void> _deleteItem(LostFoundModel item) async {
+    final ok = await _lostFoundService.deleteItem(item.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Item deleted' : 'Delete failed'),
+        backgroundColor: ok ? Colors.orange : AppTheme.errorColor,
+      ),
+    );
   }
 }

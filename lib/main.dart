@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:media_store_plus/media_store_plus.dart';
 
 import 'core/theme/app_theme.dart';
 import 'screens/splash_screen.dart';
@@ -15,7 +16,9 @@ import 'screens/admin/admin_manual_payments_screen.dart';
 import 'screens/admin/admin_payment_methods_screen.dart';
 import 'screens/admin/admin_documents_screen.dart';
 import 'screens/admin/admin_clients_screen.dart';
+import 'screens/admin/admin_events_screen.dart';
 import 'screens/admin/admin_ml_prediction_screen.dart';
+import 'screens/admin/admin_ai_assistant_screen.dart';
 import 'screens/client/client_main_screen.dart';
 import 'screens/client/client_home_screen.dart';
 import 'screens/client/client_dashboard_screen.dart';
@@ -33,9 +36,11 @@ import 'screens/client/client_ai_assistant_screen.dart';
 
 /// INSTANT APP LAUNCH - Splash screen appears immediately
 /// All heavy initialization (Firebase, etc.) happens AFTER splash displays
-void main() {
+Future<void> main() async {
   // Keep startup predictable; this is fast and ensures plugins bind correctly.
   WidgetsFlutterBinding.ensureInitialized();
+  await MediaStore.ensureInitialized();
+  MediaStore.appFolder = 'RoyalNest';
   runApp(const RoyalNestApp());
 }
 
@@ -97,7 +102,9 @@ class RoyalNestApp extends StatelessWidget {
             const AdminPaymentMethodsScreen(),
         '/admin-documents': (context) => const AdminDocumentsScreen(),
         '/admin-clients': (context) => const AdminClientsScreen(),
+        '/admin-events': (context) => const AdminEventsScreen(),
         '/admin-ml-prediction': (context) => const AdminMLPredictionScreen(),
+        '/admin-ai-assistant': (context) => const AdminAIAssistantScreen(),
         // Client routes
         '/client-main': (context) => const ClientMainScreen(),
         '/client-home': (context) => const ClientHomeScreen(),

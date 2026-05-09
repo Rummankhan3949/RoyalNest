@@ -30,13 +30,7 @@ class AppConstants {
   ];
 
   // ============== PLOT TYPES ==============
-  static const List<String> plotTypes = [
-    'Residential',
-    'Commercial',
-    'Corner',
-    'Park Facing',
-    'Boulevard',
-  ];
+  static const List<String> plotTypes = ['Residential', 'Commercial'];
 
   // ============== PAYMENT STATUS ==============
   static const String paymentPaid = 'paid';
@@ -57,14 +51,24 @@ class AppConstants {
 
   // ============== DOCUMENT STATUS ==============
   static const String documentPending = 'pending';
+  // New canonical status for admin decisions.
+  static const String documentApproved = 'approved';
+  // Backward compatibility for older documents and UI paths.
   static const String documentVerified = 'verified';
   static const String documentRejected = 'rejected';
 
   // ============== LOST & FOUND STATUS ==============
   static const String itemLost = 'lost';
   static const String itemFound = 'found';
+  static const String itemActive = 'active';
   static const String itemClaimed = 'claimed';
+  static const String itemResolved = 'resolved';
   static const String itemReturned = 'returned';
+
+  // ============== LOST & FOUND CLAIM STATUS ==============
+  static const String claimPending = 'pending';
+  static const String claimApproved = 'approved';
+  static const String claimRejected = 'rejected';
 
   // ============== USER ROLES ==============
   static const String roleAdmin = 'admin';

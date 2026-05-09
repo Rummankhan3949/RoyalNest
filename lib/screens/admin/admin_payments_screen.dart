@@ -197,6 +197,12 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen>
   }
 
   Widget _buildPaymentCard(PaymentModel payment) {
+    final totalInstallments = payment.totalInstallments <= 0
+        ? 1
+        : payment.totalInstallments;
+    final remainingInstallments = (totalInstallments - payment.paidInstallments)
+        .clamp(0, totalInstallments);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: AppTheme.cardDecoration,
@@ -358,6 +364,12 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen>
             ),
             const SizedBox(height: 12),
             _buildInstallmentBreakdownStrip(payment),
+            const SizedBox(height: 10),
+            _buildAdminInstallmentStatusRow(payment),
+            if (payment.paidInstallments >= 1 && remainingInstallments > 0) ...[
+              const SizedBox(height: 10),
+              _buildAdminPredictionCard(payment, remainingInstallments),
+            ],
             if (payment.nextDueDate != null) ...[
               const SizedBox(height: 12),
               Container(
@@ -731,6 +743,7 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen>
 
   Color _documentStatusColor(String status) {
     switch (status.toLowerCase()) {
+      case 'approved':
       case 'verified':
         return Colors.green;
       case 'rejected':
@@ -842,6 +855,106 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen>
           fontWeight: FontWeight.bold,
           color: color,
         ),
+      ),
+    );
+  }
+
+  Widget _buildAdminInstallmentStatusRow(PaymentModel payment) {
+    final now = DateTime.now();
+    final total = payment.totalInstallments <= 0
+        ? 1
+        : payment.totalInstallments;
+    final paid = payment.paidInstallments.clamp(0, total);
+    final remaining = (total - paid).clamp(0, total);
+
+    late final String label;
+    late final Color color;
+
+    if (paid == 0) {
+      label = 'Not Started';
+      color = Colors.red;
+    } else if (remaining == 0 || payment.status == 'paid') {
+      label = 'Completed';
+      color = Colors.green;
+    } else if (payment.nextDueDate != null &&
+        payment.nextDueDate!.isAfter(now)) {
+      label = 'Upcoming';
+      color = Colors.orange;
+    } else {
+      label = 'In Progress';
+      color = Colors.blue;
+    }
+
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+            ),
+          ),
+        ),
+        const Spacer(),
+        Text(
+          'Paid: $paid  Remaining: $remaining',
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Colors.black54,
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAdminPredictionCard(
+    PaymentModel payment,
+    int remainingInstallments,
+  ) {
+    final nextDueDate =
+        payment.nextDueDate ??
+        (payment.installmentHistory.isNotEmpty
+            ? DateTime(
+                payment.installmentHistory.last.paidDate.year,
+                payment.installmentHistory.last.paidDate.month + 1,
+                payment.installmentHistory.last.paidDate.day,
+              )
+            : DateTime.now());
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Prediction',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: Colors.blue,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Next due date: ${_formatDate(nextDueDate)}\n'
+            'Remaining installments: $remainingInstallments',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ],
       ),
     );
   }

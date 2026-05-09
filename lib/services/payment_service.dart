@@ -18,6 +18,23 @@ class PaymentService {
   final InstallmentService _installmentService = InstallmentService();
   final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
+  bool isInstallmentDue(PaymentModel payment, {DateTime? now}) {
+    if (payment.status == 'paid') return false;
+
+    final due = payment.nextDueDate;
+    if (due == null) return true;
+
+    final currentDate = now ?? DateTime.now();
+    final currentDay = DateTime(
+      currentDate.year,
+      currentDate.month,
+      currentDate.day,
+    );
+    final dueDay = DateTime(due.year, due.month, due.day);
+
+    return !currentDay.isBefore(dueDay);
+  }
+
   /// Get all payments
   Stream<List<PaymentModel>> getAllPayments() {
     return _firestore
@@ -109,19 +126,28 @@ class PaymentService {
     final now = DateTime.now();
     final nextMonth = DateTime(now.year, now.month + 1, now.day);
 
-    return _firestore
-        .collection(_collection)
-        .where(
-          'nextDueDate',
-          isLessThanOrEqualTo: Timestamp.fromDate(nextMonth),
-        )
-        .where('status', isNotEqualTo: 'paid')
-        .snapshots()
-        .map(
-          (snapshot) => snapshot.docs
-              .map((doc) => PaymentModel.fromMap(doc.data(), doc.id))
-              .toList(),
-        );
+    return _firestore.collection(_collection).snapshots().map((snapshot) {
+      final duePayments = snapshot.docs
+          .map((doc) => PaymentModel.fromMap(doc.data(), doc.id))
+          .where(
+            (payment) =>
+                payment.status != 'paid' &&
+                payment.nextDueDate != null &&
+                !payment.nextDueDate!.isAfter(nextMonth),
+          )
+          .toList();
+
+      duePayments.sort((left, right) {
+        final leftDate = left.nextDueDate;
+        final rightDate = right.nextDueDate;
+        if (leftDate == null && rightDate == null) return 0;
+        if (leftDate == null) return 1;
+        if (rightDate == null) return -1;
+        return leftDate.compareTo(rightDate);
+      });
+
+      return duePayments;
+    });
   }
 
   /// Create new payment record
@@ -161,6 +187,10 @@ class PaymentService {
       if (!paymentDoc.exists) return null;
 
       final payment = PaymentModel.fromMap(paymentDoc.data()!, paymentDoc.id);
+
+      if (!isInstallmentDue(payment)) {
+        return null;
+      }
 
       final newPaidInstallments = payment.paidInstallments + 1;
       final newPaidAmount = payment.paidAmount + installment.amount;
@@ -437,17 +467,15 @@ class PaymentService {
       final now = DateTime.now();
       final reminderDate = DateTime(now.year, now.month + 1, 1);
 
-      final snapshot = await _firestore
-          .collection(_collection)
-          .where('status', isNotEqualTo: 'paid')
-          .get();
+      final snapshot = await _firestore.collection(_collection).get();
 
       int remindersSent = 0;
 
       for (var doc in snapshot.docs) {
         final payment = PaymentModel.fromMap(doc.data(), doc.id);
 
-        if (payment.nextDueDate != null &&
+        if (payment.status != 'paid' &&
+            payment.nextDueDate != null &&
             payment.nextDueDate!.isBefore(reminderDate)) {
           final message =
               'Dear ${payment.clientName}, your next installment of PKR ${payment.monthlyInstallment.toStringAsFixed(0)} for ${payment.plotDetails} is due on ${payment.nextDueDate!.day}/${payment.nextDueDate!.month}/${payment.nextDueDate!.year}. Please ensure timely payment.';
@@ -567,16 +595,30 @@ class PaymentService {
     final snapshot = await _firestore
         .collection(_collection)
         .where('clientId', isEqualTo: clientId)
-        .where('status', isNotEqualTo: 'paid')
-        .limit(1)
         .get();
 
-    if (snapshot.docs.isEmpty) return null;
-    final data = snapshot.docs.first.data();
+    final eligiblePayments =
+        snapshot.docs
+            .map((doc) => doc.data())
+            .where((data) => (data['status'] ?? 'unpaid').toString() != 'paid')
+            .toList()
+          ..sort((left, right) {
+            final leftDate = (left['nextDueDate'] as Timestamp?)?.toDate();
+            final rightDate = (right['nextDueDate'] as Timestamp?)?.toDate();
+
+            if (leftDate == null && rightDate == null) return 0;
+            if (leftDate == null) return 1;
+            if (rightDate == null) return -1;
+            return leftDate.compareTo(rightDate);
+          });
+
+    if (eligiblePayments.isEmpty) return null;
+
+    final data = eligiblePayments.first;
     final nextDueDate = (data['nextDueDate'] as Timestamp?)?.toDate();
     return {
       'plotDetails': data['plotDetails'] ?? 'Plot Payment',
-      'amount': data['monthlyInstallment'] ?? 0,
+      'amount': (data['monthlyInstallment'] ?? 0).toDouble(),
       'dueDate': nextDueDate,
     };
   }

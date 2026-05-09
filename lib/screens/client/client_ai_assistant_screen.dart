@@ -18,15 +18,19 @@ class _ClientAIAssistantScreenState extends State<ClientAIAssistantScreen> {
   final AIAssistantService _assistantService = AIAssistantService();
   final List<String> _suggestedPrompts = const [
     'How can I check my installment status?',
+    'Where do I download a challan?',
+    'How do I start a 360 tour?',
     'Guide me to submit a new query.',
-    'How do I book an appointment?',
-    'Show me how to view my documents.',
   ];
   bool _isTyping = false;
+  bool _isCheckingAiKey = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ensureAiKeyConfigured();
+    });
   }
 
   @override
@@ -66,7 +70,11 @@ class _ClientAIAssistantScreenState extends State<ClientAIAssistantScreen> {
 
     setState(() => _isTyping = true);
     try {
-      final reply = await _assistantService.reply(userMessage: message);
+      final reply = await _assistantService.reply(
+        userMessage: message,
+        currentScreen: 'AI Assistant',
+        userRole: 'client',
+      );
       if (!mounted) return;
       setState(() => _isTyping = false);
       _addMessage(text: reply, isUser: false);
@@ -86,6 +94,110 @@ class _ClientAIAssistantScreenState extends State<ClientAIAssistantScreen> {
     }
   }
 
+  Future<void> _ensureAiKeyConfigured() async {
+    final hasCompiledKey = const String.fromEnvironment(
+      'GEMINI_API_KEY',
+      defaultValue: '',
+    ).trim().isNotEmpty;
+
+    if (hasCompiledKey) {
+      if (mounted) {
+        setState(() => _isCheckingAiKey = false);
+      }
+      return;
+    }
+
+    final saved = await _assistantService.getSavedApiKey();
+    if (!mounted) {
+      return;
+    }
+
+    if (saved.isNotEmpty) {
+      setState(() => _isCheckingAiKey = false);
+      return;
+    }
+
+    setState(() => _isCheckingAiKey = false);
+    await _showApiKeyDialog(force: true);
+  }
+
+  Future<void> _showApiKeyDialog({bool force = false}) async {
+    final existing = await _assistantService.getSavedApiKey();
+    if (!mounted) {
+      return;
+    }
+
+    final controller = TextEditingController(text: existing);
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: !force,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text('Gemini API Key Setup'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Paste your Gemini API key (from the key details page). It is saved only on this device.',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'AIzaSy...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            if (!force)
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+            TextButton(
+              onPressed: () async {
+                final key = controller.text.trim();
+                if (key.isEmpty) {
+                  await _assistantService.clearSavedApiKey();
+                } else {
+                  await _assistantService.saveApiKey(key);
+                }
+
+                if (!context.mounted) {
+                  return;
+                }
+                Navigator.of(context).pop();
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      key.isEmpty
+                          ? 'API key cleared. AI will use fallback mode.'
+                          : 'API key saved successfully.',
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+  }
+
   Future<void> _useSuggestedPrompt(String prompt) async {
     _messageController.text = prompt;
     await _handleSendMessage();
@@ -100,6 +212,11 @@ class _ClientAIAssistantScreenState extends State<ClientAIAssistantScreen> {
           decoration: const BoxDecoration(gradient: AppTheme.primaryGradient),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.vpn_key_outlined),
+            onPressed: _showApiKeyDialog,
+            tooltip: 'Set Gemini API key',
+          ),
           IconButton(
             icon: const Icon(Icons.info_outline),
             onPressed: () {
@@ -128,6 +245,7 @@ class _ClientAIAssistantScreenState extends State<ClientAIAssistantScreen> {
       ),
       body: Column(
         children: [
+          if (_isCheckingAiKey) const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: _messages.isEmpty
                 ? _buildEmptyState()

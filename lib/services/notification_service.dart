@@ -22,6 +22,10 @@ class NotificationService {
 
   /// Get user's notifications
   Stream<List<NotificationModel>> getUserNotifications(String userId) {
+    if (userId.trim().isEmpty) {
+      return Stream<List<NotificationModel>>.value(const []);
+    }
+
     return _firestore
         .collection(_collection)
         .where('targetUserId', isEqualTo: userId)
@@ -38,6 +42,10 @@ class NotificationService {
     String userId, {
     int? limit,
   }) {
+    if (userId.trim().isEmpty) {
+      return Stream<List<NotificationModel>>.value(const []);
+    }
+
     Query<Map<String, dynamic>> query = _firestore
         .collection(_collection)
         .where('targetUserId', isEqualTo: userId);
@@ -55,6 +63,10 @@ class NotificationService {
 
   /// Get unread notifications count
   Stream<int> getUnreadCount(String userId) {
+    if (userId.trim().isEmpty) {
+      return Stream<int>.value(0);
+    }
+
     return _firestore
         .collection(_collection)
         .where('targetUserId', isEqualTo: userId)

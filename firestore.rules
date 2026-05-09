@@ -13,19 +13,37 @@ service cloud.firestore {
     }
     
     // Helper function to check if user is admin (hardcoded admin emails)
-    function isAdminByRole() {
+    function userDocExists() {
       return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdminByRole() {
+      return userDocExists() &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isAdminByEmail() {
+      return isSignedIn() &&
+        request.auth.token.email is string && (
+          request.auth.token.email.matches('(?i)^admin17@gmail\\.com$') ||
+          request.auth.token.email.matches('(?i)^admin@royalnest\\.com$') ||
+          request.auth.token.email.matches('(?i)^admin@gmail\\.com$') ||
+          request.auth.token.email.matches('(?i)^superadmin@royalnest\\.com$')
+        );
     }
 
     function isAdmin() {
       return isSignedIn() && (
         isAdminByRole() ||
-        request.auth.token.email == 'admin17@gmail.com' ||
-        request.auth.token.email == 'admin@royalnest.com' ||
-        request.auth.token.email == 'admin@gmail.com' ||
-        request.auth.token.email == 'superadmin@royalnest.com'
+        isAdminByEmail()
       );
+    }
+
+    function isActiveUser() {
+      // Keep app usable for authenticated users even if user profile flags are
+      // missing or temporarily inconsistent; block handling is enforced in app logic.
+      return isSignedIn();
     }
 
     function isPaymentOwner() {
@@ -41,61 +59,65 @@ service cloud.firestore {
         request.resource.data.clientId == request.auth.uid
       );
     }
+
+    function isLostFoundOwner() {
+      return isSignedIn() && resource.data.reportedById == request.auth.uid;
+    }
     
     // Users collection - enhanced permissions
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && (isOwner(userId) || isAdmin());
-      allow update: if isSignedIn() && (isOwner(userId) || isAdmin());
-      allow delete: if isSignedIn() && isAdmin();
+      allow create: if isActiveUser() && (isOwner(userId) || isAdmin());
+      allow update: if (isActiveUser() && isOwner(userId)) || isAdmin();
+      allow delete: if isAdmin();
     }
     
     // Societies collection - admin can write, all can read
     match /societies/{societyId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn(); // Allow all authenticated users for flexibility
+      allow read: if isActiveUser();
+      allow write: if isActiveUser(); // Allow all authenticated users for flexibility
     }
     
     // Plots collection - admin manages, clients can read their own
     match /plots/{plotId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn(); // Allow all for admin operations
-      allow list: if isSignedIn(); // Allow listing with queries
+      allow read: if isActiveUser();
+      allow create, update, delete: if isActiveUser(); // Allow all for admin operations
+      allow list: if isActiveUser(); // Allow listing with queries
     }
     
     // Queries collection - clients create, admin manages
     match /queries/{queryId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isSignedIn(); // Allow admin to update responses
-      allow list: if isSignedIn(); // Enable querying
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update, delete: if isActiveUser(); // Allow admin to update responses
+      allow list: if isActiveUser(); // Enable querying
     }
     
     // Appointments collection - clients book, admin manages
     match /appointments/{appointmentId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isSignedIn(); // Allow admin to confirm/cancel
-      allow list: if isSignedIn(); // Enable filtering by status
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update, delete: if isActiveUser(); // Allow admin to confirm/cancel
+      allow list: if isActiveUser(); // Enable filtering by status
     }
     
     // Payments collection - admin creates, clients view
     match /payments/{paymentId} {
-      allow read: if isAdmin() || isPaymentOwner();
-      allow create: if isCreatingOwnPayment() || isAdmin();
-      allow update: if isAdmin() || isPaymentOwner();
+      allow read: if (isActiveUser() && isPaymentOwner()) || isAdmin();
+      allow create: if (isActiveUser() && isCreatingOwnPayment()) || isAdmin();
+      allow update: if (isActiveUser() && isPaymentOwner()) || isAdmin();
       allow delete: if isAdmin();
-      allow list: if isSignedIn();
+      allow list: if isActiveUser() || isAdmin();
     }
 
     // Installments tracker collection
     match /installments/{installmentId} {
-      allow read: if isSignedIn() && (
+      allow read: if isActiveUser() && (
         isAdmin() ||
         resource.data.userId == request.auth.uid
       );
       allow create, update, delete: if isAdmin();
-      allow list: if isSignedIn();
+      allow list: if isActiveUser() || isAdmin();
     }
 
     // Reminder logs for duplicate prevention
@@ -107,32 +129,67 @@ service cloud.firestore {
 
     // Payment methods collection - admin manages, all authenticated users can read
     match /payment_methods/{methodId} {
-      allow read, list: if isSignedIn();
+      allow read, list: if isActiveUser() || isAdmin();
       allow create, update, delete: if isAdmin();
     }
     
     // Documents collection - clients submit, admin verifies
     match /documents/{documentId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn(); // Allow admin to update status
-      allow delete: if isSignedIn() && isAdmin();
-      allow list: if isSignedIn(); // Enable document queries
+      allow read: if isActiveUser() || isAdmin();
+      allow create: if isActiveUser();
+      allow update: if isActiveUser() || isAdmin(); // Allow admin to update status
+      allow delete: if isAdmin();
+      allow list: if isActiveUser() || isAdmin(); // Enable document queries
     }
     
-    // Lost & Found collection - all authenticated users can read and write
+    function isLostFoundClaimFlagUpdate() {
+      return isActiveUser() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'hasClaimRequest'
+        ]) &&
+        request.resource.data.hasClaimRequest == true;
+    }
+
+    // Lost & Found collection - controlled updates for claim lifecycle
     match /lost_found/{itemId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isSignedIn(); // Allow status updates
-      allow list: if isSignedIn(); // Enable filtering
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update: if isAdmin() ||
+        isLostFoundOwner() ||
+        isLostFoundClaimFlagUpdate();
+      allow delete: if isAdmin() || isLostFoundOwner();
+      allow list: if isActiveUser(); // Enable filtering
+    }
+
+    // Claim requests for Lost & Found ownership verification
+    match /claims/{claimId} {
+      allow read, list: if isActiveUser();
+
+      // Claimant can only create claim for another user's item.
+      allow create: if isActiveUser() &&
+        request.resource.data.claimantUserId == request.auth.uid &&
+        request.resource.data.ownerUserId != request.auth.uid;
+
+      // Owner or admin can review/update claim status.
+      allow update: if isActiveUser() && (
+        resource.data.ownerUserId == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow delete: if isAdmin();
     }
     
     // Notifications collection - all authenticated users can read and write
     match /notifications/{notificationId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn();
-      allow list: if isSignedIn(); // Enable notification queries
+      allow read: if isActiveUser() || isAdmin();
+      allow create, update, delete: if isActiveUser() || isAdmin();
+      allow list: if isActiveUser() || isAdmin(); // Enable notification queries
+    }
+
+    // Event management: admins can write, active users can read.
+    match /events/{eventId} {
+      allow read, list: if isActiveUser() || isAdmin();
+      allow create, update, delete: if isAdmin();
     }
   }
 }

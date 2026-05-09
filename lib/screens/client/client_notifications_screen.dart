@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -17,10 +18,29 @@ class ClientNotificationsScreen extends StatefulWidget {
 
 class _ClientNotificationsScreenState extends State<ClientNotificationsScreen> {
   final NotificationService _notificationService = NotificationService();
+  Timer? _timeRefreshTimer;
   String get userId => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   @override
+  void initState() {
+    super.initState();
+    _timeRefreshTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timeRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isSignedIn = userId.isNotEmpty;
+
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
@@ -43,56 +63,100 @@ class _ClientNotificationsScreenState extends State<ClientNotificationsScreen> {
         ],
       ),
       drawer: const ClientDrawer(),
-      body: StreamBuilder<List<NotificationModel>>(
-        stream: _notificationService.getNotifications(userId),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
-          final notifications = snapshot.data ?? [];
-
-          if (notifications.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.notifications_none,
-                    size: 80,
-                    color: Colors.grey.shade400,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No Notifications',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey.shade600,
+      body: !isSignedIn
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.lock_outline,
+                      size: 56,
+                      color: Colors.grey,
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'You\'re all caught up!',
-                    style: TextStyle(color: Colors.grey.shade500),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Session expired. Please login again.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(
+                          context,
+                        ).pushNamedAndRemoveUntil('/login', (route) => false);
+                      },
+                      child: const Text('Go to Login'),
+                    ),
+                  ],
+                ),
               ),
-            );
-          }
+            )
+          : StreamBuilder<List<NotificationModel>>(
+              stream: _notificationService.getNotifications(userId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: notifications.length,
-            itemBuilder: (context, index) =>
-                _buildNotificationCard(notifications[index]),
-          );
-        },
-      ),
+                if (snapshot.hasError) {
+                  final errorText =
+                      snapshot.error?.toString() ?? 'Unknown error';
+                  final readable = errorText.contains('permission-denied')
+                      ? 'Permission denied. Please sign in again.'
+                      : 'Failed to load notifications. Please try again.';
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text(readable, textAlign: TextAlign.center),
+                    ),
+                  );
+                }
+
+                final notifications = snapshot.data ?? [];
+
+                if (notifications.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.notifications_none,
+                          size: 80,
+                          color: Colors.grey.shade400,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No Notifications',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'You\'re all caught up!',
+                          style: TextStyle(color: Colors.grey.shade500),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: notifications.length,
+                  itemBuilder: (context, index) =>
+                      _buildNotificationCard(notifications[index]),
+                );
+              },
+            ),
     );
   }
 
@@ -208,11 +272,14 @@ class _ClientNotificationsScreenState extends State<ClientNotificationsScreen> {
     if (difference.inMinutes < 1) {
       return 'Just now';
     } else if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
+      final minutes = difference.inMinutes;
+      return minutes == 1 ? '1 minute ago' : '$minutes minutes ago';
     } else if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
+      final hours = difference.inHours;
+      return hours == 1 ? '1 hour ago' : '$hours hours ago';
     } else if (difference.inDays < 7) {
-      return '${difference.inDays}d ago';
+      final days = difference.inDays;
+      return days == 1 ? '1 day ago' : '$days days ago';
     } else {
       return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
     }

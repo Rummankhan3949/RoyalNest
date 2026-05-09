@@ -1,10 +1,12 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:media_store_plus/media_store_plus.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../models/payment_model.dart';
@@ -27,6 +29,7 @@ class _ClientPaymentsScreenState extends State<ClientPaymentsScreen>
     with SingleTickerProviderStateMixin {
   final PaymentService _paymentService = PaymentService();
   final ManualPaymentService _manualPaymentService = ManualPaymentService();
+  final Map<String, bool> _predictionExpandedByPayment = {};
   String get userId => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   late AnimationController _listAnimController;
@@ -250,6 +253,10 @@ class _ClientPaymentsScreenState extends State<ClientPaymentsScreen>
     final paidInstallments = _paidInstallments(payment);
     final unpaidInstallments = _unpaidInstallments(payment);
     final upcomingInstallments = _upcomingInstallments(payment);
+    final remainingInstallments = (totalInstallments - paidInstallments).clamp(
+      0,
+      totalInstallments,
+    );
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -468,6 +475,13 @@ class _ClientPaymentsScreenState extends State<ClientPaymentsScreen>
                     ),
                   ),
                 ],
+                if (paidInstallments >= 1) ...[
+                  const SizedBox(height: 14),
+                  _buildInstallmentPredictionCard(
+                    payment,
+                    remainingInstallments: remainingInstallments,
+                  ),
+                ],
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -489,6 +503,16 @@ class _ClientPaymentsScreenState extends State<ClientPaymentsScreen>
   }
 
   Future<void> _navigateToCheckout(PaymentModel payment) async {
+    if (!_paymentService.isInstallmentDue(payment)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You cannot pay this installment yet'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final nextInstallmentNumber = (payment.paidInstallments + 1).clamp(
       1,
       _safeTotalInstallments(payment),
@@ -506,14 +530,181 @@ class _ClientPaymentsScreenState extends State<ClientPaymentsScreen>
           isOnlineFlow: true,
           initialMode: 'online',
           hasVoucher: true,
-          onDownloadChallan: () =>
-              _downloadInstallmentVoucher(payment, nextInstallmentNumber),
+          onDownloadChallan: () => _downloadInstallmentVoucher(
+            payment,
+            nextInstallmentNumber,
+            showSnackbar: false,
+          ),
         ),
       ),
     );
 
     if (!mounted) return;
     _listAnimController.forward(from: 0);
+  }
+
+  Widget _buildInstallmentPredictionCard(
+    PaymentModel payment, {
+    required int remainingInstallments,
+  }) {
+    final expanded = _predictionExpandedByPayment[payment.id] ?? false;
+    final nextDueDate = _predictedNextDueDate(payment);
+    final timelineText = _predictionTimelineText(
+      payment,
+      remainingInstallments: remainingInstallments,
+      nextDueDate: nextDueDate,
+    );
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 280),
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        children: [
+          ListTile(
+            onTap: () {
+              setState(() {
+                _predictionExpandedByPayment[payment.id] = !expanded;
+              });
+            },
+            leading: const Icon(Icons.insights, color: Colors.blue),
+            title: const Text(
+              'Installment Prediction',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            subtitle: Text(
+              'Next due: ${_formatDate(nextDueDate)}',
+              style: const TextStyle(fontSize: 12),
+            ),
+            trailing: AnimatedRotation(
+              duration: const Duration(milliseconds: 260),
+              turns: expanded ? 0.5 : 0,
+              child: const Icon(Icons.expand_more),
+            ),
+          ),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 280),
+            crossFadeState: expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _counterTile(
+                          label: 'Paid',
+                          value: payment.paidInstallments,
+                          color: Colors.green,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _counterTile(
+                          label: 'Remaining',
+                          value: remainingInstallments,
+                          color: Colors.orange,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      timelineText,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _counterTile({
+    required String label,
+    required int value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          TweenAnimationBuilder<double>(
+            duration: const Duration(milliseconds: 420),
+            tween: Tween<double>(begin: 0, end: value.toDouble()),
+            builder: (context, animated, _) {
+              return Text(
+                animated.round().toString(),
+                style: TextStyle(
+                  color: color,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w600,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  DateTime _predictedNextDueDate(PaymentModel payment) {
+    if (payment.nextDueDate != null) {
+      return payment.nextDueDate!;
+    }
+
+    if (payment.installmentHistory.isNotEmpty) {
+      final lastPaymentDate = payment.installmentHistory.last.paidDate;
+      return DateTime(
+        lastPaymentDate.year,
+        lastPaymentDate.month + 1,
+        lastPaymentDate.day,
+      );
+    }
+
+    return DateTime.now();
+  }
+
+  String _predictionTimelineText(
+    PaymentModel payment, {
+    required int remainingInstallments,
+    required DateTime nextDueDate,
+  }) {
+    return 'Next due date: ${_formatDate(nextDueDate)}\n'
+        'Remaining installments: $remainingInstallments\n'
+        'Projected timeline: ${remainingInstallments == 0 ? 'Completed plan' : '$remainingInstallments month(s) remaining'}';
   }
 
   Widget _buildStatusBadge(String status) {
@@ -768,10 +959,11 @@ class _ClientPaymentsScreenState extends State<ClientPaymentsScreen>
     return unpaid - 1;
   }
 
-  Future<void> _downloadInstallmentVoucher(
+  Future<bool> _downloadInstallmentVoucher(
     PaymentModel payment,
-    int installmentNumber,
-  ) async {
+    int installmentNumber, {
+    bool showSnackbar = true,
+  }) async {
     List<PaymentMethodModel> methods = [];
     try {
       methods = await _manualPaymentService.getActivePaymentMethodsOnce();
@@ -784,12 +976,47 @@ class _ClientPaymentsScreenState extends State<ClientPaymentsScreen>
       installmentNumber: installmentNumber,
       paymentMethods: methods,
     );
-
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename:
-          'royalnest_installment_${payment.plotId}_$installmentNumber.pdf',
+    final ok = await _saveAndSharePdf(
+      bytes,
+      'royalnest_installment_${payment.plotId}_$installmentNumber.pdf',
     );
+    if (!mounted) return ok;
+    if (showSnackbar) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ok
+                ? 'Voucher downloaded successfully.'
+                : 'Download failed. Try again.',
+          ),
+        ),
+      );
+    }
+    return ok;
+  }
+
+  Future<bool> _saveAndSharePdf(Uint8List bytes, String filename) async {
+    if (Platform.isAndroid) {
+      try {
+        await MediaStore.ensureInitialized();
+        MediaStore.appFolder = 'RoyalNest';
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/$filename');
+        await tempFile.writeAsBytes(bytes, flush: true);
+        final saved = await MediaStore().saveFile(
+          tempFilePath: tempFile.path,
+          dirType: DirType.download,
+          dirName: DirName.download,
+          relativePath: null,
+        );
+        if (saved != null) {
+          return true;
+        }
+      } catch (_) {
+        // Continue to fallback.
+      }
+    }
+    return false;
   }
 
   Future<Uint8List> _buildInstallmentVoucherPdf({
@@ -800,132 +1027,148 @@ class _ClientPaymentsScreenState extends State<ClientPaymentsScreen>
     final doc = pw.Document();
     final now = DateTime.now();
     final issuedAt =
-        '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+        '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
+    final due = payment.nextDueDate ?? now.add(const Duration(days: 4));
+    final dueAt =
+        '${due.day.toString().padLeft(2, '0')}/${due.month.toString().padLeft(2, '0')}/${due.year}';
     final voucherNumber =
         'RN-INS-${payment.plotId.toUpperCase()}-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
+    final societyName = _extractSocietyName(payment.plotDetails);
+    final method = _pickSocietyPaymentMethod(paymentMethods, societyName);
 
-    pw.Widget item(String label, String value, {bool strong = false}) {
-      return pw.Padding(
-        padding: const pw.EdgeInsets.only(bottom: 8),
-        child: pw.Row(
-          children: [
-            pw.SizedBox(
-              width: 160,
-              child: pw.Text(
-                label,
-                style: const pw.TextStyle(
-                  fontSize: 11,
-                  color: PdfColors.blueGrey800,
-                ),
-              ),
-            ),
-            pw.Expanded(
-              child: pw.Text(
-                value,
-                style: pw.TextStyle(
-                  fontSize: strong ? 13 : 11,
-                  fontWeight: strong
-                      ? pw.FontWeight.bold
-                      : pw.FontWeight.normal,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
+    String money(double value) => 'PKR ${value.toStringAsFixed(0)}';
 
     doc.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4,
         build: (_) {
-          return pw.Padding(
-            padding: const pw.EdgeInsets.all(24),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Container(
-                  width: double.infinity,
-                  padding: const pw.EdgeInsets.all(14),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.blue900,
-                    borderRadius: pw.BorderRadius.circular(8),
+          pw.Widget item(String label, String value) {
+            return pw.Container(
+              padding: const pw.EdgeInsets.symmetric(vertical: 3),
+              child: pw.Row(
+                children: [
+                  pw.SizedBox(
+                    width: 70,
+                    child: pw.Text(
+                      label,
+                      style: pw.TextStyle(
+                        fontSize: 8,
+                        color: PdfColors.grey700,
+                      ),
+                    ),
                   ),
-                  child: pw.Row(
+                  pw.Expanded(
+                    child: pw.Text(
+                      value,
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          pw.Widget challanCopy(String copyTitle) {
+            return pw.Container(
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey700, width: 0.8),
+              ),
+              padding: const pw.EdgeInsets.all(8),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                     children: [
                       pw.Text(
-                        'ROYAL NEST - INSTALLMENT VOUCHER',
+                        'ROYAL DEVELOPER',
                         style: pw.TextStyle(
-                          color: PdfColors.white,
                           fontWeight: pw.FontWeight.bold,
-                          fontSize: 14,
+                          fontSize: 9,
                         ),
                       ),
                       pw.Text(
-                        voucherNumber,
-                        style: const pw.TextStyle(
-                          color: PdfColors.white,
-                          fontSize: 10,
+                        copyTitle,
+                        style: pw.TextStyle(
+                          fontSize: 7,
+                          color: PdfColors.grey700,
                         ),
                       ),
                     ],
                   ),
-                ),
-                pw.SizedBox(height: 16),
-                item('Issued At', issuedAt),
-                item('Plot', payment.plotDetails),
-                item('Client', payment.clientName),
-                item('Installment Number', '#$installmentNumber'),
-                item(
-                  'Amount Due Now',
-                  'PKR ${payment.monthlyInstallment.toStringAsFixed(0)}',
-                  strong: true,
-                ),
-                item(
-                  'Due Date',
-                  payment.nextDueDate != null
-                      ? _formatDate(payment.nextDueDate)
-                      : 'Due soon',
-                ),
-                pw.Divider(color: PdfColors.grey400),
-                pw.Text(
-                  'Admin Payment Channels',
-                  style: pw.TextStyle(
-                    fontWeight: pw.FontWeight.bold,
-                    fontSize: 12,
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    'Installment Challan',
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
-                ),
-                pw.SizedBox(height: 6),
-                if (paymentMethods.isEmpty)
+                  pw.Divider(color: PdfColors.grey400),
+                  item('Voucher No', voucherNumber),
+                  item('Society', societyName),
+                  item('Plot', payment.plotDetails),
+                  item('Client', payment.clientName),
                   item(
-                    'Account Details',
-                    'Will be provided in app payment methods',
-                  )
-                else
-                  ...paymentMethods
-                      .take(4)
-                      .map(
-                        (method) => item(
-                          method.methodName,
-                          '${method.accountTitle} - ${method.accountNumber}',
-                        ),
+                    'Installment',
+                    '$installmentNumber of ${payment.totalInstallments}',
+                  ),
+                  item('Issue Date', issuedAt),
+                  item('Due Date', dueAt),
+                  pw.Divider(color: PdfColors.grey400),
+                  item('Amount', money(payment.monthlyInstallment)),
+                  item('Remaining', money(payment.remainingAmount)),
+                  pw.Divider(color: PdfColors.grey400),
+                  if (method == null)
+                    item('Account', 'Contact admin')
+                  else ...[
+                    item('Bank', method.methodName),
+                    item('Title', method.accountTitle),
+                    item('Account', method.accountNumber),
+                  ],
+                  pw.Spacer(),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        'Signature (Client)',
+                        style: pw.TextStyle(fontSize: 7),
                       ),
-                pw.SizedBox(height: 16),
-                pw.Container(
-                  width: double.infinity,
-                  padding: const pw.EdgeInsets.all(12),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.grey100,
-                    borderRadius: pw.BorderRadius.circular(6),
+                      pw.Text(
+                        'Signature (Cashier)',
+                        style: pw.TextStyle(fontSize: 7),
+                      ),
+                    ],
                   ),
-                  child: pw.Text(
-                    'Instructions: Pay only the currently due installment amount shown above, then upload paid proof in app for admin verification.',
-                    style: const pw.TextStyle(fontSize: 10),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    'Pay within 3-4 days. Keep this copy safe.',
+                    style: pw.TextStyle(fontSize: 7, color: PdfColors.grey700),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            );
+          }
+
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'Print this challan and deposit at your bank branch. Keep your copy for record.',
+                style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(child: challanCopy('Customer Copy')),
+                  pw.SizedBox(width: 6),
+                  pw.Expanded(child: challanCopy('Office Copy')),
+                  pw.SizedBox(width: 6),
+                  pw.Expanded(child: challanCopy('Bank Copy')),
+                ],
+              ),
+            ],
           );
         },
       ),
@@ -965,6 +1208,25 @@ class _ClientPaymentsScreenState extends State<ClientPaymentsScreen>
       return 'PKR ${(amount / 100000).toStringAsFixed(2)} L';
     }
     return 'PKR ${amount.toStringAsFixed(0)}';
+  }
+
+  String _extractSocietyName(String plotDetails) {
+    final parts = plotDetails.split('-');
+    if (parts.isEmpty) return plotDetails;
+    return parts.last.trim();
+  }
+
+  PaymentMethodModel? _pickSocietyPaymentMethod(
+    List<PaymentMethodModel> methods,
+    String societyName,
+  ) {
+    if (methods.isEmpty) return null;
+    final normalizedSociety = societyName.trim().toLowerCase();
+    final matched = methods.firstWhere(
+      (method) => method.societyName.trim().toLowerCase() == normalizedSociety,
+      orElse: () => methods.first,
+    );
+    return matched;
   }
 
   String _formatDate(DateTime? date) {

@@ -36,6 +36,53 @@ class ClientService {
         });
   }
 
+  /// Get only registered non-admin users from users collection.
+  Stream<List<UserModel>> getRegisteredUsers() {
+    return _firestore
+        .collection(_usersCollection)
+        .where('role', isEqualTo: 'client')
+        .snapshots()
+        .map((snapshot) {
+          final users = snapshot.docs
+              .map((doc) {
+                final raw = Map<String, dynamic>.from(doc.data());
+                raw['uid'] = (raw['uid'] ?? '').toString().trim().isNotEmpty
+                    ? raw['uid']
+                    : doc.id;
+                return UserModel.fromMap(raw);
+              })
+              .where(
+                (user) =>
+                    user.uid.trim().isNotEmpty &&
+                    user.email.trim().isNotEmpty &&
+                    user.role == 'client',
+              )
+              .toList();
+
+          users.sort((a, b) {
+            final aTime = a.createdAt?.millisecondsSinceEpoch ?? 0;
+            final bTime = b.createdAt?.millisecondsSinceEpoch ?? 0;
+            return bTime.compareTo(aTime);
+          });
+          return users;
+        });
+  }
+
+  Future<bool> updateUserBlockStatus({
+    required String userId,
+    required bool isBlocked,
+  }) async {
+    try {
+      await _firestore.collection(_usersCollection).doc(userId).update({
+        'isBlocked': isBlocked,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Get client by ID
   Future<UserModel?> getClientById(String clientId) async {
     try {

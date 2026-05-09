@@ -5,6 +5,8 @@ class PaymentMethodModel {
   final String methodName;
   final String accountTitle;
   final String accountNumber;
+  final String bankId;
+  final String societyName;
   final bool isActive;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -14,6 +16,8 @@ class PaymentMethodModel {
     required this.methodName,
     required this.accountTitle,
     required this.accountNumber,
+    this.bankId = '',
+    this.societyName = '',
     this.isActive = true,
     this.createdAt,
     this.updatedAt,
@@ -27,6 +31,8 @@ class PaymentMethodModel {
           .toString(),
       accountNumber: (map['account_number'] ?? map['accountNumber'] ?? '')
           .toString(),
+      bankId: (map['bank_id'] ?? map['bankId'] ?? '').toString(),
+      societyName: (map['society_name'] ?? map['societyName'] ?? '').toString(),
       isActive: (map['is_active'] ?? map['isActive'] ?? true) == true,
       createdAt: ((map['created_at'] ?? map['createdAt']) as Timestamp?)
           ?.toDate(),
@@ -40,6 +46,8 @@ class PaymentMethodModel {
       'method_name': methodName,
       'account_title': accountTitle,
       'account_number': accountNumber,
+      if (bankId.isNotEmpty) 'bank_id': bankId,
+      if (societyName.isNotEmpty) 'society_name': societyName,
       'is_active': isActive,
       'created_at': createdAt != null
           ? Timestamp.fromDate(createdAt!)
@@ -53,6 +61,8 @@ class PaymentMethodModel {
     String? methodName,
     String? accountTitle,
     String? accountNumber,
+    String? bankId,
+    String? societyName,
     bool? isActive,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -62,6 +72,8 @@ class PaymentMethodModel {
       methodName: methodName ?? this.methodName,
       accountTitle: accountTitle ?? this.accountTitle,
       accountNumber: accountNumber ?? this.accountNumber,
+      bankId: bankId ?? this.bankId,
+      societyName: societyName ?? this.societyName,
       isActive: isActive ?? this.isActive,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

@@ -71,37 +71,36 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: AppConstants.societies.map((society) {
               final isSelected = _selectedSociety == society;
-              return Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: GestureDetector(
-                    onTap: () => setState(() => _selectedSociety = society),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: BoxDecoration(
-                        color: isSelected ? AppTheme.royalBlue : Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: isSelected
-                              ? AppTheme.royalBlue
-                              : AppTheme.borderColor,
-                        ),
-                      ),
-                      child: Center(
-                        child: Text(
-                          society.split(' ').last,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: isSelected
-                                ? Colors.white
-                                : AppTheme.primaryTextColor,
-                          ),
-                        ),
-                      ),
+              return InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => setState(() => _selectedSociety = society),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 10,
+                    horizontal: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSelected ? AppTheme.royalBlue : Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isSelected
+                          ? AppTheme.royalBlue
+                          : AppTheme.borderColor,
+                    ),
+                  ),
+                  child: Text(
+                    society,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected
+                          ? Colors.white
+                          : AppTheme.primaryTextColor,
                     ),
                   ),
                 ),
@@ -414,9 +413,23 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
     final priceController = TextEditingController(
       text: editPlot?.price.toString() ?? '',
     );
+    final filerPriceController = TextEditingController(
+      text: editPlot?.filerPrice?.toString() ?? '',
+    );
+    final nonFilerPriceController = TextEditingController(
+      text: editPlot?.nonFilerPrice?.toString() ?? '',
+    );
 
     String selectedSize = editPlot?.size ?? AppConstants.plotSizes.first;
     String selectedType = editPlot?.plotType ?? AppConstants.plotTypes.first;
+
+    double? parsePrice(String raw) {
+      final sanitized = raw.trim().replaceAll(RegExp(r'[^0-9.\-]'), '');
+      if (sanitized.isEmpty) return null;
+      return double.tryParse(sanitized);
+    }
+
+    bool showRequiredError = false;
 
     showModalBottomSheet(
       context: context,
@@ -458,12 +471,48 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
                     'Society: $_selectedSociety',
                     style: const TextStyle(color: Colors.grey),
                   ),
+                  const SizedBox(height: 6),
+                  if (showRequiredError)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: Colors.red.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: const Text(
+                        'Please fill all required fields marked with *',
+                        style: TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.lightBlue.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: AppTheme.royalBlue.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      child: const Text(
+                        'All fields marked with * are required.',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: titleController,
                     decoration: AppTheme.inputDecoration(
                       hint: 'e.g., 5 Marla Residential Plot',
-                      label: 'Plot Title',
+                      label: 'Plot Title *',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -474,7 +523,7 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
                           controller: plotNumberController,
                           decoration: AppTheme.inputDecoration(
                             hint: 'e.g., 123',
-                            label: 'Plot Number',
+                            label: 'Plot Number *',
                           ),
                         ),
                       ),
@@ -484,7 +533,7 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
                           controller: blockNameController,
                           decoration: AppTheme.inputDecoration(
                             hint: 'e.g., A, B, C',
-                            label: 'Block Name',
+                            label: 'Block Name *',
                           ),
                         ),
                       ),
@@ -498,7 +547,7 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
                           initialValue: selectedSize,
                           decoration: AppTheme.inputDecoration(
                             hint: 'Select Size',
-                            label: 'Size',
+                            label: 'Size *',
                           ),
                           items: AppConstants.plotSizes
                               .map(
@@ -516,7 +565,7 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
                           initialValue: selectedType,
                           decoration: AppTheme.inputDecoration(
                             hint: 'Select Type',
-                            label: 'Type',
+                            label: 'Type *',
                           ),
                           items: AppConstants.plotTypes
                               .map(
@@ -536,15 +585,41 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
                     keyboardType: TextInputType.number,
                     decoration: AppTheme.inputDecoration(
                       hint: 'e.g., 5000000',
-                      label: 'Price (PKR)',
+                      label: 'Price (PKR) *',
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: filerPriceController,
+                          keyboardType: TextInputType.number,
+                          decoration: AppTheme.inputDecoration(
+                            hint: 'e.g., 5800000',
+                            label: 'Filer Price (PKR) *',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: nonFilerPriceController,
+                          keyboardType: TextInputType.number,
+                          decoration: AppTheme.inputDecoration(
+                            hint: 'e.g., 6200000',
+                            label: 'Non-Filer Price (PKR) *',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: locationController,
                     decoration: AppTheme.inputDecoration(
                       hint: 'e.g., Near Central Park',
-                      label: 'Location Details',
+                      label: 'Location Details *',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -553,7 +628,7 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
                     maxLines: 3,
                     decoration: AppTheme.inputDecoration(
                       hint: 'Enter plot description...',
-                      label: 'Description',
+                      label: 'Description *',
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -563,15 +638,28 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
                     child: ElevatedButton(
                       style: AppTheme.primaryButtonStyle,
                       onPressed: () async {
+                        final priceValue = parsePrice(priceController.text);
+                        final filerValue = parsePrice(
+                          filerPriceController.text,
+                        );
+                        final nonFilerValue = parsePrice(
+                          nonFilerPriceController.text,
+                        );
+
                         if (titleController.text.isEmpty ||
                             plotNumberController.text.isEmpty ||
-                            priceController.text.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Please fill required fields'),
-                            ),
-                          );
+                            blockNameController.text.isEmpty ||
+                            locationController.text.isEmpty ||
+                            descriptionController.text.isEmpty ||
+                            priceValue == null ||
+                            filerValue == null ||
+                            nonFilerValue == null) {
+                          setModalState(() => showRequiredError = true);
                           return;
+                        }
+
+                        if (showRequiredError) {
+                          setModalState(() => showRequiredError = false);
                         }
 
                         final plot = PlotModel(
@@ -582,7 +670,9 @@ class _AdminPlotListingScreenState extends State<AdminPlotListingScreen> {
                           plotNumber: plotNumberController.text,
                           blockName: blockNameController.text,
                           plotType: selectedType,
-                          price: double.tryParse(priceController.text) ?? 0,
+                          price: priceValue,
+                          filerPrice: filerValue,
+                          nonFilerPrice: nonFilerValue,
                           location: locationController.text,
                           description: descriptionController.text,
                           status: editPlot?.status ?? 'available',

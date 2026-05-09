@@ -13,7 +13,8 @@ class LostFoundModel {
   final String society;
   final String reportedBy;
   final String reporterContact;
-  final String status; // lost, found, claimed, returned
+  final String status; // active, claimed, resolved (legacy values still supported)
+  final bool hasClaimRequest;
   final String? claimedBy;
   final String? claimerContact;
   final DateTime? reportedAt;
@@ -32,7 +33,8 @@ class LostFoundModel {
     required this.society,
     required this.reportedBy,
     required this.reporterContact,
-    this.status = 'lost',
+    this.status = 'active',
+    this.hasClaimRequest = false,
     this.claimedBy,
     this.claimerContact,
     this.reportedAt,
@@ -53,7 +55,8 @@ class LostFoundModel {
       society: map['society'] ?? '',
       reportedBy: map['reportedBy'] ?? '',
       reporterContact: map['reporterContact'] ?? '',
-      status: map['status'] ?? 'lost',
+      status: map['status'] ?? 'active',
+      hasClaimRequest: map['hasClaimRequest'] ?? false,
       claimedBy: map['claimedBy'],
       claimerContact: map['claimerContact'],
       reportedAt: (map['reportedAt'] as Timestamp?)?.toDate(),
@@ -75,6 +78,7 @@ class LostFoundModel {
       'reportedBy': reportedBy,
       'reporterContact': reporterContact,
       'status': status,
+      'hasClaimRequest': hasClaimRequest,
       'claimedBy': claimedBy,
       'claimerContact': claimerContact,
       'reportedAt': reportedAt != null
@@ -97,6 +101,7 @@ class LostFoundModel {
     String? reportedBy,
     String? reporterContact,
     String? status,
+    bool? hasClaimRequest,
     String? claimedBy,
     String? claimerContact,
     DateTime? reportedAt,
@@ -115,6 +120,7 @@ class LostFoundModel {
       reportedBy: reportedBy ?? this.reportedBy,
       reporterContact: reporterContact ?? this.reporterContact,
       status: status ?? this.status,
+      hasClaimRequest: hasClaimRequest ?? this.hasClaimRequest,
       claimedBy: claimedBy ?? this.claimedBy,
       claimerContact: claimerContact ?? this.claimerContact,
       reportedAt: reportedAt ?? this.reportedAt,
@@ -122,4 +128,16 @@ class LostFoundModel {
       returnedAt: returnedAt ?? this.returnedAt,
     );
   }
+
+  /// Backward-compatible lifecycle status mapper.
+  /// Legacy records may store `lost`/`found`/`returned` in status.
+  String get lifecycleStatus {
+    if (status == 'claimed' || status == 'resolved' || status == 'active') {
+      return status;
+    }
+    if (status == 'returned') return 'resolved';
+    return 'active';
+  }
+
+  bool get isClaimable => lifecycleStatus == 'active';
 }

@@ -49,7 +49,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen>
           unselectedLabelColor: Colors.white70,
           tabs: const [
             Tab(text: 'Pending'),
-            Tab(text: 'Verified'),
+            Tab(text: 'Approved'),
             Tab(text: 'Rejected'),
           ],
         ),
@@ -59,7 +59,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen>
         controller: _tabController,
         children: [
           _buildDocumentsList(AppConstants.documentPending),
-          _buildDocumentsList(AppConstants.documentVerified),
+          _buildDocumentsList(AppConstants.documentApproved),
           _buildDocumentsList(AppConstants.documentRejected),
         ],
       ),
@@ -96,8 +96,8 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen>
                 Text(
                   status == AppConstants.documentPending
                       ? 'No pending documents'
-                      : status == AppConstants.documentVerified
-                      ? 'No verified documents'
+                      : status == AppConstants.documentApproved
+                      ? 'No approved documents'
                       : 'No rejected documents',
                   style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
                 ),
@@ -243,12 +243,9 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen>
               child: Row(
                 children: [
                   Icon(
-                    document.isFilerFlag
-                        ? Icons.verified
-                        : Icons.info_outline,
+                    document.isFilerFlag ? Icons.verified : Icons.info_outline,
                     size: 20,
-                    color:
-                        document.isFilerFlag ? Colors.green : Colors.orange,
+                    color: document.isFilerFlag ? Colors.green : Colors.orange,
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -266,8 +263,9 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen>
                     document.filerStatus,
                     style: TextStyle(
                       fontSize: 12,
-                      color:
-                          document.isFilerFlag ? Colors.green : Colors.orange,
+                      color: document.isFilerFlag
+                          ? Colors.green
+                          : Colors.orange,
                     ),
                   ),
                 ],
@@ -306,10 +304,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen>
                       children: [
                         const Icon(Icons.attach_file, size: 14),
                         const SizedBox(width: 4),
-                        Text(
-                          doc,
-                          style: const TextStyle(fontSize: 12),
-                        ),
+                        Text(doc, style: const TextStyle(fontSize: 12)),
                       ],
                     ),
                   );
@@ -416,9 +411,10 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen>
         color = Colors.orange;
         label = 'Pending';
         break;
+      case AppConstants.documentApproved:
       case AppConstants.documentVerified:
         color = Colors.green;
-        label = 'Verified';
+        label = 'Approved';
         break;
       case AppConstants.documentRejected:
         color = Colors.red;

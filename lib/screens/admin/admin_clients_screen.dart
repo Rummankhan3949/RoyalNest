@@ -19,6 +19,8 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
   final ClientService _clientService = ClientService();
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  String _sortBy = 'latest';
+  bool _updatingUserBlock = false;
 
   @override
   void dispose() {
@@ -33,7 +35,7 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
       appBar: AppBar(
         backgroundColor: AppTheme.royalBlue,
         title: const Text(
-          'Client Details',
+          'Registered Users',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         iconTheme: const IconThemeData(color: Colors.white),
@@ -48,7 +50,7 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
               decoration:
                   AppTheme.inputDecoration(
                     hint: 'Search by name, email, or CNIC...',
-                    label: 'Search Clients',
+                    label: 'Search Registered Users',
                   ).copyWith(
                     prefixIcon: const Icon(Icons.search),
                     suffixIcon: _searchQuery.isNotEmpty
@@ -64,9 +66,36 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
               onChanged: (value) => setState(() => _searchQuery = value),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Row(
+              children: [
+                const Text(
+                  'Sort:',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(width: 10),
+                DropdownButton<String>(
+                  value: _sortBy,
+                  items: const [
+                    DropdownMenuItem(value: 'latest', child: Text('Latest')),
+                    DropdownMenuItem(value: 'name', child: Text('Name A-Z')),
+                    DropdownMenuItem(
+                      value: 'blocked_first',
+                      child: Text('Blocked First'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _sortBy = value);
+                  },
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: StreamBuilder<List<UserModel>>(
-              stream: _clientService.getAllClients(),
+              stream: _clientService.getRegisteredUsers(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -81,7 +110,7 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
                 final clients = snapshot.data ?? [];
 
                 // Filter clients based on search query
-                final filteredClients = _searchQuery.isEmpty
+                var filteredClients = _searchQuery.isEmpty
                     ? clients
                     : clients.where((client) {
                         final query = _searchQuery.toLowerCase();
@@ -89,6 +118,25 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
                             client.email.toLowerCase().contains(query) ||
                             client.cnic.toLowerCase().contains(query);
                       }).toList();
+
+                if (_sortBy == 'name') {
+                  filteredClients.sort(
+                    (a, b) => a.username.toLowerCase().compareTo(
+                      b.username.toLowerCase(),
+                    ),
+                  );
+                } else if (_sortBy == 'blocked_first') {
+                  filteredClients.sort((a, b) {
+                    if (a.isBlocked == b.isBlocked) return 0;
+                    return a.isBlocked ? -1 : 1;
+                  });
+                } else {
+                  filteredClients.sort((a, b) {
+                    final aTime = a.createdAt?.millisecondsSinceEpoch ?? 0;
+                    final bTime = b.createdAt?.millisecondsSinceEpoch ?? 0;
+                    return bTime.compareTo(aTime);
+                  });
+                }
 
                 if (filteredClients.isEmpty) {
                   return Center(
@@ -122,7 +170,7 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
-                          'Registered Clients (${filteredClients.length})',
+                          'Registered Users (${filteredClients.length})',
                           style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
@@ -249,6 +297,40 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
               Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 240),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: client.isBlocked
+                          ? Colors.red.withValues(alpha: 0.12)
+                          : Colors.green.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      client.isBlocked ? 'Blocked' : 'Active',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: client.isBlocked ? Colors.red : Colors.green,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Transform.scale(
+                    scale: 0.82,
+                    child: Switch(
+                      value: !client.isBlocked,
+                      onChanged: _updatingUserBlock
+                          ? null
+                          : (isActive) => _toggleBlockStatus(
+                              client,
+                              shouldBlock: !isActive,
+                            ),
+                    ),
+                  ),
                   if (client.isFiler)
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -269,7 +351,7 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
                       ),
                     )
                   else
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 14),
                   const SizedBox(height: 8),
                   const Icon(
                     Icons.chevron_right,
@@ -280,6 +362,34 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _toggleBlockStatus(
+    UserModel user, {
+    required bool shouldBlock,
+  }) async {
+    setState(() => _updatingUserBlock = true);
+
+    final ok = await _clientService.updateUserBlockStatus(
+      userId: user.uid,
+      isBlocked: shouldBlock,
+    );
+
+    if (!mounted) return;
+    setState(() => _updatingUserBlock = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? (shouldBlock
+                    ? 'User blocked successfully.'
+                    : 'User unblocked successfully.')
+              : 'Unable to update user status.',
+        ),
+        backgroundColor: ok ? Colors.green : Colors.red,
       ),
     );
   }
@@ -486,6 +596,11 @@ class _ClientDetailSheet extends StatelessWidget {
           const SizedBox(height: 16),
           _buildInfoRow('CNIC', client.cnic),
           _buildInfoRow('Filer Status', client.isFiler ? 'Yes' : 'No'),
+          _buildInfoRow(
+            'Account Status',
+            client.isBlocked ? 'Blocked' : 'Active',
+            valueColor: client.isBlocked ? Colors.red : Colors.green,
+          ),
           _buildInfoRow(
             'Documents',
             client.isDocumentsVerified ? 'Verified' : 'Pending',

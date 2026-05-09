@@ -16,19 +16,21 @@ class ClientManualPaymentScreen extends StatefulWidget {
   final String propertyId;
   final String propertyName;
   final double amount;
+  final String? heroTag;
   final String? linkedPaymentId;
   final int? installmentNumber;
   final String? installmentType;
   final bool isOnlineFlow;
   final bool hasVoucher;
   final String initialMode;
-  final Future<void> Function()? onDownloadChallan;
+  final Future<bool> Function()? onDownloadChallan;
 
   const ClientManualPaymentScreen({
     super.key,
     required this.propertyId,
     required this.propertyName,
     required this.amount,
+    this.heroTag,
     this.linkedPaymentId,
     this.installmentNumber,
     this.installmentType,
@@ -117,12 +119,18 @@ class _ClientManualPaymentScreenState extends State<ClientManualPaymentScreen>
       return;
     }
 
-    await widget.onDownloadChallan!();
+    final ok = await widget.onDownloadChallan!();
     if (!mounted) return;
-    setState(() => _challanDownloaded = true);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Challan downloaded successfully.')),
-    );
+    if (ok) {
+      setState(() => _challanDownloaded = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Challan downloaded successfully.')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Download failed. Please try again.')),
+      );
+    }
   }
 
   Future<void> _copyText(String value, String label) async {
@@ -411,6 +419,14 @@ class _ClientManualPaymentScreenState extends State<ClientManualPaymentScreen>
               Text('Account Title: ${method.accountTitle}'),
               const SizedBox(height: 4),
               Text('Account Number/IBAN: ${method.accountNumber}'),
+              if (method.bankId.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text('Bank ID: ${method.bankId}'),
+              ],
+              if (method.societyName.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text('Society: ${method.societyName}'),
+              ],
               if (method.methodName.toLowerCase().contains('bank')) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -442,19 +458,6 @@ class _ClientManualPaymentScreenState extends State<ClientManualPaymentScreen>
                         _copyText(_formatAmount(widget.amount), 'Amount'),
                     icon: const Icon(Icons.copy, size: 16),
                     label: const Text('Copy Amount'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Open your payment app and send $_installmentTitle amount.',
-                          ),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.open_in_new, size: 16),
-                    label: const Text('Open App'),
                   ),
                 ],
               ),
@@ -508,6 +511,13 @@ class _ClientManualPaymentScreenState extends State<ClientManualPaymentScreen>
             '${method.accountTitle} • ${method.accountNumber}',
             style: const TextStyle(fontSize: 12),
           ),
+          if (method.bankId.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Bank ID: ${method.bankId}',
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -532,6 +542,26 @@ class _ClientManualPaymentScreenState extends State<ClientManualPaymentScreen>
     );
   }
 
+  Widget _buildStaggeredSection({required int order, required Widget child}) {
+    final begin = (order * 0.11).clamp(0.0, 0.75);
+    final end = (begin + 0.3).clamp(0.0, 1.0);
+    final animation = CurvedAnimation(
+      parent: _fadeController,
+      curve: Interval(begin, end, curve: Curves.easeOutCubic),
+    );
+
+    return FadeTransition(
+      opacity: animation,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.05),
+          end: Offset.zero,
+        ).animate(animation),
+        child: child,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -544,472 +574,570 @@ class _ClientManualPaymentScreenState extends State<ClientManualPaymentScreen>
         ),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
-      body: FadeTransition(
-        opacity: _fadeController,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildStepIndicator(),
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
+      body: Stack(
+        children: [
+          Positioned(
+            top: -90,
+            left: -80,
+            child: IgnorePointer(
+              child: Container(
+                width: 220,
+                height: 220,
                 decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.propertyName,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '$_installmentTitle Amount: ${_formatAmount(widget.amount)}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (widget.hasVoucher) ...[
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Voucher downloaded. Use one account below to pay and upload proof.',
-                        style: TextStyle(color: Colors.white, fontSize: 12),
-                      ),
-                    ],
-                  ],
+                  shape: BoxShape.circle,
+                  color: AppTheme.lightBlue.withValues(alpha: 0.26),
                 ),
               ),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
+            ),
+          ),
+          Positioned(
+            top: 180,
+            right: -60,
+            child: IgnorePointer(
+              child: Container(
+                width: 170,
+                height: 170,
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: AppTheme.lightShadow,
+                  shape: BoxShape.circle,
+                  color: Colors.teal.withValues(alpha: 0.08),
                 ),
-                child: SegmentedButton<PaymentFlowMode>(
-                  segments: const [
-                    ButtonSegment<PaymentFlowMode>(
-                      value: PaymentFlowMode.online,
-                      icon: Icon(Icons.language),
-                      label: Text('Pay Online'),
+              ),
+            ),
+          ),
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildStaggeredSection(order: 0, child: _buildStepIndicator()),
+                const SizedBox(height: 16),
+                _buildStaggeredSection(
+                  order: 1,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: AppTheme.primaryGradient,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.royalBlue.withValues(alpha: 0.28),
+                          blurRadius: 24,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
                     ),
-                    ButtonSegment<PaymentFlowMode>(
-                      value: PaymentFlowMode.manual,
-                      icon: Icon(Icons.account_balance),
-                      label: Text('Pay Manually'),
-                    ),
-                  ],
-                  selected: {_mode},
-                  onSelectionChanged: (value) {
-                    setState(() {
-                      _mode = value.first;
-                      _selectedMethod = null;
-                      _hasSentMoney = false;
-                    });
-                  },
-                ),
-              ),
-              const SizedBox(height: 18),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.amber.shade200),
-                ),
-                child: const Text(
-                  'Instructions:\n1) Select payment mode and channel.\n2) Send the currently due installment and tick confirmation.\n3) Upload paid receipt screenshot.\n4) Submit for admin verification.',
-                  style: TextStyle(height: 1.4),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                _mode == PaymentFlowMode.online
-                    ? 'Online Payment Channels'
-                    : 'Manual Bank Payment',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 10),
-              StreamBuilder<List<PaymentMethodModel>>(
-                stream: _paymentService.getActivePaymentMethods(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.hasError) {
-                    return Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.red.shade200),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Could not load payment methods.',
-                            style: TextStyle(
-                              color: Colors.red,
-                              fontWeight: FontWeight.w700,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Hero(
+                              tag:
+                                  widget.heroTag ??
+                                  'payment-hero-${widget.propertyId}',
+                              child: Container(
+                                padding: const EdgeInsets.all(9),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(
+                                  Icons.account_balance_wallet_rounded,
+                                  color: Colors.white,
+                                ),
+                              ),
                             ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                widget.propertyName,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '$_installmentTitle Amount: ${_formatAmount(widget.amount)}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
                           ),
+                        ),
+                        if (widget.hasVoucher) ...[
                           const SizedBox(height: 6),
-                          Text(
-                            '${snapshot.error}',
-                            style: const TextStyle(fontSize: 12),
+                          const Text(
+                            'Voucher downloaded. Use one account below to pay and upload proof.',
+                            style: TextStyle(color: Colors.white, fontSize: 12),
                           ),
                         ],
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildStaggeredSection(
+                  order: 2,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: AppTheme.lightShadow,
+                    ),
+                    child: SegmentedButton<PaymentFlowMode>(
+                      segments: const [
+                        ButtonSegment<PaymentFlowMode>(
+                          value: PaymentFlowMode.online,
+                          icon: Icon(Icons.language),
+                          label: Text('Pay Online'),
+                        ),
+                        ButtonSegment<PaymentFlowMode>(
+                          value: PaymentFlowMode.manual,
+                          icon: Icon(Icons.account_balance),
+                          label: Text('Pay Manually'),
+                        ),
+                      ],
+                      selected: {_mode},
+                      onSelectionChanged: (value) {
+                        setState(() {
+                          _mode = value.first;
+                          _selectedMethod = null;
+                          _hasSentMoney = false;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                _buildStaggeredSection(
+                  order: 3,
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.white,
+                          AppTheme.lightBlue.withValues(alpha: 0.65),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
-                    );
-                  }
-                  final methods = snapshot.data ?? [];
-                  if (methods.isEmpty) {
-                    return Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppTheme.royalBlue.withValues(alpha: 0.16),
                       ),
-                      child: const Text(
-                        'No active payment methods available right now.',
-                      ),
-                    );
-                  }
+                    ),
+                    child: const Text(
+                      'Instructions:\n1) Select payment mode and channel.\n2) Check the Bank ID and Society name before paying.\n3) Send the currently due installment and tick confirmation.\n4) Upload paid receipt screenshot.\n5) Submit for admin verification.',
+                      style: TextStyle(height: 1.4),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                _buildStaggeredSection(
+                  order: 4,
+                  child: Text(
+                    _mode == PaymentFlowMode.online
+                        ? 'Online Payment Channels'
+                        : 'Manual Bank Payment',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildStaggeredSection(
+                  order: 5,
+                  child: StreamBuilder<List<PaymentMethodModel>>(
+                    stream: _paymentService.getActivePaymentMethods(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.red.shade200),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Could not load payment methods.',
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '${snapshot.error}',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      final methods = snapshot.data ?? [];
+                      if (methods.isEmpty) {
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'No active payment methods available right now.',
+                          ),
+                        );
+                      }
 
-                  _selectedMethod ??= methods.first;
+                      _selectedMethod ??= methods.first;
 
-                  Widget modeSpecificActionBar() {
-                    if (_mode == PaymentFlowMode.manual) {
+                      Widget modeSpecificActionBar() {
+                        if (_mode == PaymentFlowMode.manual) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: _downloadChallan,
+                                  icon: const Icon(
+                                    Icons.download,
+                                    color: Colors.white,
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.royalBlue,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                  label: Text(
+                                    _challanDownloaded
+                                        ? 'Challan Downloaded'
+                                        : 'Download Challan',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.lightBlue,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Text(
+                                  'Manual Payment Guide:\n1) Download the challan.\n2) Confirm the Bank ID and Society name.\n3) Pay the exact installment amount.\n4) Upload the receipt screenshot after deposit.',
+                                  style: TextStyle(fontSize: 11, height: 1.4),
+                                ),
+                              ),
+                            ],
+                          );
+                        }
+
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'Select an online channel below, copy details, pay, and upload proof.',
+                            style: TextStyle(fontSize: 11),
+                            textAlign: TextAlign.center,
+                          ),
+                        );
+                      }
+
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: _downloadChallan,
-                              icon: const Icon(
-                                Icons.download,
-                                color: Colors.white,
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.royalBlue,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 280),
+                            transitionBuilder: (child, animation) {
+                              final offsetAnimation = Tween<Offset>(
+                                begin: const Offset(0, 0.08),
+                                end: Offset.zero,
+                              ).animate(animation);
+                              return FadeTransition(
+                                opacity: animation,
+                                child: SlideTransition(
+                                  position: offsetAnimation,
+                                  child: child,
                                 ),
-                              ),
-                              label: Text(
-                                _challanDownloaded
-                                    ? 'Challan Downloaded'
-                                    : 'Download Challan',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                              );
+                            },
+                            child: Container(
+                              key: ValueKey('mode_${_mode.name}'),
+                              child: modeSpecificActionBar(),
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(8),
+                          const SizedBox(height: 10),
+                          if (_isOnlineMode) ...[
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: methods
+                                    .map(
+                                      (m) => Padding(
+                                        padding: const EdgeInsets.only(
+                                          right: 8,
+                                        ),
+                                        child: ChoiceChip(
+                                          avatar: _selectedMethod?.id == m.id
+                                              ? const Icon(
+                                                  Icons.check,
+                                                  size: 16,
+                                                )
+                                              : null,
+                                          label: Text(m.methodName),
+                                          selected: _selectedMethod?.id == m.id,
+                                          onSelected: (_) {
+                                            setState(() {
+                                              _selectedMethod = m;
+                                            });
+                                          },
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                              ),
                             ),
-                            child: const Text(
-                              'Download challan, pay at bank, then upload proof.',
-                              style: TextStyle(fontSize: 11),
-                              textAlign: TextAlign.center,
+                            const SizedBox(height: 10),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 300),
+                              transitionBuilder: (child, animation) {
+                                return FadeTransition(
+                                  opacity: animation,
+                                  child: SizeTransition(
+                                    sizeFactor: animation,
+                                    axisAlignment: -1,
+                                    child: child,
+                                  ),
+                                );
+                              },
+                              child: _buildSelectedChannelSummary(
+                                _selectedMethod,
+                              ),
                             ),
+                            const SizedBox(height: 10),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 250),
+                              transitionBuilder: (child, animation) {
+                                return FadeTransition(
+                                  opacity: animation,
+                                  child: ScaleTransition(
+                                    scale: Tween<double>(
+                                      begin: 0.98,
+                                      end: 1,
+                                    ).animate(animation),
+                                    child: child,
+                                  ),
+                                );
+                              },
+                              child: _selectedMethod == null
+                                  ? const SizedBox.shrink()
+                                  : _buildMethodCard(_selectedMethod!),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            value: _hasSentMoney,
+                            onChanged: (value) {
+                              setState(() => _hasSentMoney = value ?? false);
+                            },
+                            title: Text(
+                              _mode == PaymentFlowMode.online
+                                  ? 'I have sent online payment to selected channel'
+                                  : 'I have paid manually to selected bank/account',
+                            ),
+                            subtitle: const Text(
+                              'Complete this step before uploading paid receipt proof.',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            controlAffinity: ListTileControlAffinity.leading,
                           ),
                         ],
                       );
-                    }
-
-                    return Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text(
-                        'Select an online channel below, copy details, pay, and upload proof.',
-                        style: TextStyle(fontSize: 11),
-                        textAlign: TextAlign.center,
-                      ),
-                    );
-                  }
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 280),
-                        transitionBuilder: (child, animation) {
-                          final offsetAnimation = Tween<Offset>(
-                            begin: const Offset(0, 0.08),
-                            end: Offset.zero,
-                          ).animate(animation);
-                          return FadeTransition(
-                            opacity: animation,
-                            child: SlideTransition(
-                              position: offsetAnimation,
-                              child: child,
+                    },
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _buildStaggeredSection(
+                  order: 6,
+                  child: const Text(
+                    'Upload Payment Proof',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildStaggeredSection(
+                  order: 7,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: AppTheme.lightShadow,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_proofImage != null)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.file(
+                              _proofImage!,
+                              height: 180,
+                              fit: BoxFit.cover,
                             ),
-                          );
-                        },
-                        child: Container(
-                          key: ValueKey('mode_${_mode.name}'),
-                          child: modeSpecificActionBar(),
+                          )
+                        else
+                          Container(
+                            height: 120,
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: const Center(
+                              child: Text('No screenshot selected.'),
+                            ),
+                          ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            SizedBox(
+                              width: 160,
+                              child: OutlinedButton.icon(
+                                onPressed: (_isUploading || !_canUploadProof)
+                                    ? null
+                                    : _showPickOptions,
+                                icon: const Icon(Icons.upload_file),
+                                label: const Text('Choose Image'),
+                              ),
+                            ),
+                            SizedBox(
+                              width: 160,
+                              child: ElevatedButton.icon(
+                                onPressed:
+                                    (_proofImage == null ||
+                                        _isUploading ||
+                                        !_canUploadProof)
+                                    ? null
+                                    : _uploadProof,
+                                icon: _isUploading
+                                    ? const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Icon(Icons.cloud_upload),
+                                label: const Text('Upload Proof'),
+                                style: AppTheme.primaryButtonStyle,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (_isOnlineMode) ...[
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: methods
-                                .map(
-                                  (m) => Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: ChoiceChip(
-                                      avatar: _selectedMethod?.id == m.id
-                                          ? const Icon(Icons.check, size: 16)
-                                          : null,
-                                      label: Text(m.methodName),
-                                      selected: _selectedMethod?.id == m.id,
-                                      onSelected: (_) {
-                                        setState(() {
-                                          _selectedMethod = m;
-                                        });
-                                      },
-                                    ),
+                        if (_isUploading) ...[
+                          const SizedBox(height: 10),
+                          LinearProgressIndicator(value: _uploadProgress),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${(_uploadProgress * 100).toStringAsFixed(0)}% uploaded',
+                          ),
+                        ],
+                        AnimatedScale(
+                          scale: _uploadedProofUrl != null ? 1 : 0.92,
+                          duration: const Duration(milliseconds: 220),
+                          child: _uploadedProofUrl != null
+                              ? const Padding(
+                                  padding: EdgeInsets.only(top: 8),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.check_circle,
+                                        color: Colors.green,
+                                        size: 18,
+                                      ),
+                                      SizedBox(width: 6),
+                                      Text('Proof uploaded'),
+                                    ],
                                   ),
                                 )
-                                .toList(),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
-                          transitionBuilder: (child, animation) {
-                            return FadeTransition(
-                              opacity: animation,
-                              child: SizeTransition(
-                                sizeFactor: animation,
-                                axisAlignment: -1,
-                                child: child,
-                              ),
-                            );
-                          },
-                          child: _buildSelectedChannelSummary(_selectedMethod),
-                        ),
-                        const SizedBox(height: 10),
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 250),
-                          transitionBuilder: (child, animation) {
-                            return FadeTransition(
-                              opacity: animation,
-                              child: ScaleTransition(
-                                scale: Tween<double>(
-                                  begin: 0.98,
-                                  end: 1,
-                                ).animate(animation),
-                                child: child,
-                              ),
-                            );
-                          },
-                          child: _selectedMethod == null
-                              ? const SizedBox.shrink()
-                              : _buildMethodCard(_selectedMethod!),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: _hasSentMoney,
-                        onChanged: (value) {
-                          setState(() => _hasSentMoney = value ?? false);
-                        },
-                        title: Text(
-                          _mode == PaymentFlowMode.online
-                              ? 'I have sent online payment to selected channel'
-                              : 'I have paid manually to selected bank/account',
-                        ),
-                        subtitle: const Text(
-                          'Complete this step before uploading paid receipt proof.',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                        controlAffinity: ListTileControlAffinity.leading,
-                      ),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'Upload Payment Proof',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: AppTheme.lightShadow,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_proofImage != null)
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.file(
-                          _proofImage!,
-                          height: 180,
-                          fit: BoxFit.cover,
-                        ),
-                      )
-                    else
-                      Container(
-                        height: 120,
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.grey.shade300),
-                        ),
-                        child: const Center(
-                          child: Text('No screenshot selected.'),
-                        ),
-                      ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        SizedBox(
-                          width: 160,
-                          child: OutlinedButton.icon(
-                            onPressed: (_isUploading || !_canUploadProof)
-                                ? null
-                                : _showPickOptions,
-                            icon: const Icon(Icons.upload_file),
-                            label: const Text('Choose Image'),
-                          ),
-                        ),
-                        SizedBox(
-                          width: 160,
-                          child: ElevatedButton.icon(
-                            onPressed:
-                                (_proofImage == null ||
-                                    _isUploading ||
-                                    !_canUploadProof)
-                                ? null
-                                : _uploadProof,
-                            icon: _isUploading
-                                ? const SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Icon(Icons.cloud_upload),
-                            label: const Text('Upload Proof'),
-                            style: AppTheme.primaryButtonStyle,
-                          ),
+                              : const SizedBox.shrink(),
                         ),
                       ],
-                    ),
-                    if (_isUploading) ...[
-                      const SizedBox(height: 10),
-                      LinearProgressIndicator(value: _uploadProgress),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${(_uploadProgress * 100).toStringAsFixed(0)}% uploaded',
-                      ),
-                    ],
-                    AnimatedScale(
-                      scale: _uploadedProofUrl != null ? 1 : 0.92,
-                      duration: const Duration(milliseconds: 220),
-                      child: _uploadedProofUrl != null
-                          ? const Padding(
-                              padding: EdgeInsets.only(top: 8),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.check_circle,
-                                    color: Colors.green,
-                                    size: 18,
-                                  ),
-                                  SizedBox(width: 6),
-                                  Text('Proof uploaded'),
-                                ],
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isSubmitting ? null : _submitManualPayment,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text(
-                          'I Have Paid',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 20),
+                _buildStaggeredSection(
+                  order: 8,
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _isSubmitting ? null : _submitManualPayment,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: _isSubmitting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'Confirm',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

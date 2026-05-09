@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/claim_model.dart';
 import '../../models/lost_found_model.dart';
 import '../../services/lost_found_service.dart';
 import 'client_drawer.dart';
@@ -19,14 +22,14 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final LostFoundService _lostFoundService = LostFoundService();
-  String get userId => FirebaseAuth.instance.currentUser?.uid ?? '';
-  String get userName =>
-      FirebaseAuth.instance.currentUser?.displayName ?? 'User';
+  final ImagePicker _imagePicker = ImagePicker();
+  bool _isRefreshingToken = false;
+  DateTime? _lastPermissionRefresh;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final args =
@@ -66,24 +69,104 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
           tabs: const [
             Tab(text: 'All Items'),
             Tab(text: 'My Reports'),
+            Tab(text: 'Claim Requests'),
           ],
         ),
       ),
       drawer: const ClientDrawer(),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppTheme.royalBlue,
-        onPressed: () => _showReportItemDialog(),
+        onPressed: () => _handleReportAction(),
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text('Report Item', style: TextStyle(color: Colors.white)),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [_buildAllItemsList(), _buildMyReportsList()],
+      body: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.idTokenChanges(),
+        builder: (context, authSnapshot) {
+          if (authSnapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final currentUser = authSnapshot.data;
+          if (currentUser == null) {
+            return _buildAuthRequiredMessage(
+              'Please sign in to use Lost & Found.',
+            );
+          }
+
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              _buildAllItemsList(currentUser.uid),
+              _buildMyReportsList(currentUser.uid),
+              _buildClaimRequestsList(currentUser.uid),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildAllItemsList() {
+  User? _currentUserOrPrompt() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please sign in to continue.')),
+        );
+      }
+    }
+    return user;
+  }
+
+  void _handleReportAction() {
+    final user = _currentUserOrPrompt();
+    if (user == null) return;
+    _showReportItemDialog();
+  }
+
+  void _recoverFromPermissionDenied(Object? error) {
+    final errorText = error?.toString() ?? '';
+    if (!errorText.contains('permission-denied')) return;
+    if (_isRefreshingToken) return;
+    final lastRefresh = _lastPermissionRefresh;
+    if (lastRefresh != null &&
+        DateTime.now().difference(lastRefresh).inSeconds < 10) {
+      return;
+    }
+
+    _isRefreshingToken = true;
+    _lastPermissionRefresh = DateTime.now();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await FirebaseAuth.instance.currentUser?.getIdToken(true);
+      } finally {
+        if (mounted) {
+          setState(() => _isRefreshingToken = false);
+        } else {
+          _isRefreshingToken = false;
+        }
+      }
+    });
+  }
+
+  Widget _buildAuthRequiredMessage(String message) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          message,
+          style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAllItemsList(String currentUserId) {
+    if (currentUserId.isEmpty) {
+      return _buildAuthRequiredMessage('Sign in to view all items.');
+    }
     return StreamBuilder<List<LostFoundModel>>(
       stream: _lostFoundService.getAllItems(),
       builder: (context, snapshot) {
@@ -92,7 +175,12 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
         }
 
         if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
+          _recoverFromPermissionDenied(snapshot.error);
+          final errorText = snapshot.error?.toString() ?? 'Unknown error';
+          final readable = errorText.contains('permission-denied')
+              ? 'Permission denied. Please sign in again.'
+              : 'Failed to load items. Please try again.';
+          return Center(child: Text(readable));
         }
 
         final items = snapshot.data ?? [];
@@ -116,22 +204,31 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
         return ListView.builder(
           padding: const EdgeInsets.all(16),
           itemCount: items.length,
-          itemBuilder: (context, index) => _buildItemCard(items[index]),
+          itemBuilder: (context, index) =>
+              _buildItemCard(items[index], currentUserId),
         );
       },
     );
   }
 
-  Widget _buildMyReportsList() {
+  Widget _buildMyReportsList(String currentUserId) {
+    if (currentUserId.isEmpty) {
+      return _buildAuthRequiredMessage('Sign in to view your reports.');
+    }
     return StreamBuilder<List<LostFoundModel>>(
-      stream: _lostFoundService.getMyReports(userId),
+      stream: _lostFoundService.getMyReports(currentUserId),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
         if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
+          _recoverFromPermissionDenied(snapshot.error);
+          final errorText = snapshot.error?.toString() ?? 'Unknown error';
+          final readable = errorText.contains('permission-denied')
+              ? 'Permission denied. Please sign in again.'
+              : 'Failed to load reports. Please try again.';
+          return Center(child: Text(readable));
         }
 
         final items = snapshot.data ?? [];
@@ -169,14 +266,19 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
         return ListView.builder(
           padding: const EdgeInsets.all(16),
           itemCount: items.length,
-          itemBuilder: (context, index) => _buildItemCard(items[index]),
+          itemBuilder: (context, index) =>
+              _buildItemCard(items[index], currentUserId),
         );
       },
     );
   }
 
-  Widget _buildItemCard(LostFoundModel item) {
-    final isMyReport = item.reportedById == userId;
+  Widget _buildItemCard(LostFoundModel item, String currentUserId) {
+    final isMyReport = item.reportedById == currentUserId;
+    final canClaim =
+        !isMyReport &&
+        item.isClaimable &&
+        (item.claimedBy == null || item.claimedBy!.isEmpty);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -248,7 +350,10 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
                                   ),
                                 ),
                               ),
-                              _buildStatusChip(item.status),
+                              AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 280),
+                                child: _buildStatusChip(item.lifecycleStatus),
+                              ),
                             ],
                           ),
                           Text(
@@ -341,18 +446,32 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
                     ),
                   ),
                 ],
-                if (!isMyReport &&
-                    item.status != AppConstants.itemReturned) ...[
+                if (!isMyReport) ...[
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
-                    child: OutlinedButton.icon(
-                      style: AppTheme.outlineButtonStyle,
-                      onPressed: () => _contactReporter(item),
-                      icon: const Icon(Icons.phone),
-                      label: const Text('Contact Reporter'),
+                    child: ElevatedButton.icon(
+                      style: AppTheme.primaryButtonStyle,
+                      onPressed: canClaim ? () => _showClaimForm(item) : null,
+                      icon: const Icon(Icons.assignment_turned_in),
+                      label: const Text(
+                        'Claim Item',
+                        style: TextStyle(color: Colors.white),
+                      ),
                     ),
                   ),
+                  if (!canClaim) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      item.lifecycleStatus == AppConstants.itemActive
+                          ? 'Claim unavailable for this item.'
+                          : 'This item is no longer active.',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
                 ],
               ],
             ),
@@ -367,21 +486,18 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
     String label;
 
     switch (status) {
-      case AppConstants.itemLost:
-        color = Colors.red;
-        label = 'Lost';
-        break;
-      case AppConstants.itemFound:
+      case AppConstants.itemActive:
         color = Colors.blue;
-        label = 'Found';
+        label = 'Active';
         break;
       case AppConstants.itemClaimed:
         color = Colors.orange;
         label = 'Claimed';
         break;
+      case AppConstants.itemResolved:
       case AppConstants.itemReturned:
         color = Colors.green;
-        label = 'Returned';
+        label = 'Resolved';
         break;
       default:
         color = Colors.grey;
@@ -440,37 +556,6 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
     return '${date.day}/${date.month}/${date.year}';
   }
 
-  void _contactReporter(LostFoundModel item) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Contact Information'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Reporter: ${item.reportedBy}'),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(Icons.phone, size: 16, color: AppTheme.royalBlue),
-                const SizedBox(width: 8),
-                Text(item.reporterContact),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showReportItemDialog() {
     final titleController = TextEditingController();
     final descriptionController = TextEditingController();
@@ -482,6 +567,9 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      sheetAnimationStyle: AnimationStyle(
+        duration: const Duration(milliseconds: 280),
+      ),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -592,6 +680,9 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
                       style: AppTheme.primaryButtonStyle,
                       onPressed: () async {
                         final messenger = ScaffoldMessenger.of(context);
+                        final currentUser = _currentUserOrPrompt();
+                        if (currentUser == null) return;
+
                         if (titleController.text.isEmpty ||
                             descriptionController.text.isEmpty ||
                             locationController.text.isEmpty) {
@@ -605,17 +696,20 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
 
                         Navigator.pop(ctx);
 
+                        final userId = currentUser.uid;
+                        final userName = currentUser.displayName ?? 'User';
+
                         final item = LostFoundModel(
                           id: '',
                           title: titleController.text,
                           description: descriptionController.text,
                           category: selectedCategory,
-                          status: selectedType,
+                          type: selectedType,
+                          status: AppConstants.itemActive,
                           reportedById: userId,
                           reportedBy: userName,
                           reporterContact:
-                              FirebaseAuth.instance.currentUser?.phoneNumber ??
-                              'Not provided',
+                              currentUser.phoneNumber ?? 'Not provided',
                           society: selectedSociety,
                           location: locationController.text,
                           reportedAt: DateTime.now(),
@@ -642,6 +736,281 @@ class _ClientLostFoundScreenState extends State<ClientLostFoundScreen>
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildClaimRequestsList(String currentUserId) {
+    if (currentUserId.isEmpty) {
+      return _buildAuthRequiredMessage('Sign in to view claim requests.');
+    }
+    return StreamBuilder<List<ClaimModel>>(
+      stream: _lostFoundService.getClaimRequestsForOwner(currentUserId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          _recoverFromPermissionDenied(snapshot.error);
+          final errorText = snapshot.error?.toString() ?? 'Unknown error';
+          final readable = errorText.contains('permission-denied')
+              ? 'Permission denied. Please sign in again.'
+              : 'Failed to load claim requests. Please try again.';
+          return Center(child: Text(readable));
+        }
+        final claims = snapshot.data ?? [];
+        if (claims.isEmpty) {
+          return Center(
+            child: Text(
+              'No pending claim requests',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
+            ),
+          );
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: claims.length,
+          itemBuilder: (context, index) =>
+              _buildClaimRequestCard(claims[index]),
+        );
+      },
+    );
+  }
+
+  Widget _buildClaimRequestCard(ClaimModel claim) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: AppTheme.cardDecoration,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Claimant: ${claim.claimantName}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            const SizedBox(height: 8),
+            Text('Proof: ${claim.proofText}'),
+            if (claim.proofImageUrl != null && claim.proofImageUrl!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.network(
+                    claim.proofImageUrl!,
+                    height: 160,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      height: 160,
+                      color: Colors.grey.shade200,
+                      child: const Icon(Icons.broken_image),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                    ),
+                    onPressed: () => _approveClaim(claim),
+                    icon: const Icon(Icons.check, color: Colors.white),
+                    label: const Text(
+                      'Approve',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: AppTheme.outlineButtonStyle,
+                    onPressed: () => _rejectClaim(claim),
+                    icon: const Icon(Icons.close),
+                    label: const Text('Reject'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showClaimForm(LostFoundModel item) async {
+    final proofController = TextEditingController();
+    File? selectedImage;
+    bool isSubmitting = false;
+    final currentUser = _currentUserOrPrompt();
+    if (currentUser == null) return;
+    final userId = currentUser.uid;
+    final userName = currentUser.displayName ?? 'User';
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      sheetAnimationStyle: AnimationStyle(
+        duration: const Duration(milliseconds: 300),
+      ),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          Future<void> pickImage() async {
+            final image = await _imagePicker.pickImage(
+              source: ImageSource.gallery,
+              imageQuality: 80,
+            );
+            if (image == null) return;
+            setModalState(() => selectedImage = File(image.path));
+          }
+
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20,
+              20,
+              MediaQuery.of(context).viewInsets.bottom + 20,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Claim Item',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: proofController,
+                    maxLines: 4,
+                    decoration: AppTheme.inputDecoration(
+                      hint: 'Describe proof of ownership...',
+                      label: 'Proof Description',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    style: AppTheme.outlineButtonStyle,
+                    onPressed: pickImage,
+                    icon: const Icon(Icons.image_outlined),
+                    label: Text(
+                      selectedImage == null
+                          ? 'Upload Proof Image (Optional)'
+                          : 'Image Selected',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: AppTheme.primaryButtonStyle,
+                      onPressed: isSubmitting
+                          ? null
+                          : () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              if (proofController.text.trim().isEmpty) {
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Proof description is required.',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                              setModalState(() => isSubmitting = true);
+                              try {
+                                String? proofImageUrl;
+                                if (selectedImage != null) {
+                                  proofImageUrl = await _lostFoundService
+                                      .uploadClaimProofImage(
+                                        file: selectedImage!,
+                                        userId: userId,
+                                        itemId: item.id,
+                                      );
+                                }
+
+                                await _lostFoundService.createClaim(
+                                  item: item,
+                                  claimantUserId: userId,
+                                  claimantName: userName,
+                                  proofText: proofController.text.trim(),
+                                  proofImageUrl: proofImageUrl,
+                                );
+                                if (!mounted) return;
+                                Navigator.pop(ctx);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Claim request submitted'),
+                                    backgroundColor: AppTheme.successColor,
+                                  ),
+                                );
+                              } catch (e) {
+                                messenger.showSnackBar(
+                                  SnackBar(content: Text(e.toString())),
+                                );
+                              } finally {
+                                if (context.mounted) {
+                                  setModalState(() => isSubmitting = false);
+                                }
+                              }
+                            },
+                      child: isSubmitting
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text(
+                              'Submit Claim',
+                              style: AppTheme.buttonText,
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _approveClaim(ClaimModel claim) async {
+    final ok = await _lostFoundService.approveClaim(
+      claimId: claim.id,
+      itemId: claim.itemId,
+      claimantUserId: claim.claimantUserId,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Claim approved successfully' : 'Failed to approve'),
+        backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
+      ),
+    );
+  }
+
+  Future<void> _rejectClaim(ClaimModel claim) async {
+    final ok = await _lostFoundService.rejectClaim(
+      claimId: claim.id,
+      claimantUserId: claim.claimantUserId,
+      itemId: claim.itemId,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Claim rejected' : 'Failed to reject'),
+        backgroundColor: ok ? Colors.orange : AppTheme.errorColor,
       ),
     );
   }

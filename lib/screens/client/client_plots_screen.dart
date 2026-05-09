@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -5,10 +6,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:media_store_plus/media_store_plus.dart';
 
-import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/data/panorama_scenes.dart';
 import '../../core/providers/app_state_provider.dart';
 import '../../models/plot_model.dart';
 import '../../models/user_model.dart';
@@ -19,6 +21,7 @@ import '../../services/payment_service.dart';
 import '../../services/manual_payment_service.dart';
 import 'client_manual_payment_screen.dart';
 import 'client_drawer.dart';
+import 'panorama_fullscreen_screen.dart';
 
 /// Client Plots Screen - View and browse available plots by society
 class ClientPlotsScreen extends StatefulWidget {
@@ -75,6 +78,23 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
   }
 
   bool get _isDocumentVerified => _currentUser?.isDocumentsVerified == true;
+
+  String _formatPkr(double amount) => 'PKR ${amount.toStringAsFixed(0)}';
+
+  double _selectedPriceForTaxStatus(PlotModel plot, bool isFiler) {
+    final filerPrice = plot.filerPrice;
+    final nonFilerPrice = plot.nonFilerPrice;
+
+    if (isFiler && filerPrice != null && filerPrice > 0) {
+      return filerPrice;
+    }
+
+    if (!isFiler && nonFilerPrice != null && nonFilerPrice > 0) {
+      return nonFilerPrice;
+    }
+
+    return plot.price;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -246,7 +266,7 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
-        onTap: () => _showPlotDetails(plot),
+        onTap: () => _openVirtualTourForPlot(plot),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -394,6 +414,50 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _openVirtualTourForPlot(PlotModel plot) {
+    final group = findPanoramaGroupByName(plot.society);
+    if (group == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Virtual tour is not available for this society yet.'),
+        ),
+      );
+      return;
+    }
+
+    final scenes = buildTourScenes(group);
+    if (scenes.isEmpty) return;
+
+    for (int i = 0; i < scenes.length && i < 4; i++) {
+      precacheImage(AssetImage(scenes[i].imagePath), context);
+    }
+
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        transitionDuration: const Duration(milliseconds: 500),
+        reverseTransitionDuration: const Duration(milliseconds: 350),
+        pageBuilder: (_, __, ___) => PanoramaFullscreenScreen(
+          scenes: scenes,
+          societyName: group.name,
+          accentColor: group.accentColor,
+        ),
+        transitionsBuilder: (_, animation, __, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+          );
+          return FadeTransition(
+            opacity: curved,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.93, end: 1.0).animate(curved),
+              child: child,
+            ),
+          );
+        },
       ),
     );
   }
@@ -688,15 +752,11 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
     );
   }
 
-  int _extractPercent(dynamic raw, int fallback) {
-    if (raw == null) return fallback;
-    final cleaned = raw.toString().replaceAll('%', '').trim();
-    return int.tryParse(cleaned) ?? fallback;
-  }
-
   Future<void> _showPurchaseOptions(PlotModel plot) async {
     bool isFiler = _currentUser?.isFiler ?? true;
-    int installments = isFiler ? 15 : 12;
+    bool isInstallmentPlan = false;
+    int installmentYears = 3;
+    final paymentHeroTag = 'payment-hero-${plot.id}';
 
     await showModalBottomSheet<void>(
       context: context,
@@ -707,31 +767,24 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final plan = isFiler
-                ? AppConstants.filerPlan
-                : AppConstants.nonFilerPlan;
-            final maxInstallments =
-                (plan['months'] as int?) ?? (isFiler ? 36 : 30);
-            final minInstallments = isFiler ? 15 : 12;
-            if (installments < minInstallments) installments = minInstallments;
-            if (installments > maxInstallments) installments = maxInstallments;
-
-            final bookingPercent = _extractPercent(plan['booking'], 10);
-            final confirmationPercent = _extractPercent(
-              plan['confirmation'],
-              15,
-            );
-
-            final bookingAmount = plot.price * (bookingPercent / 100);
-            final confirmationAmount = plot.price * (confirmationPercent / 100);
-            final remainingAfterUpfront =
-                (plot.price - bookingAmount - confirmationAmount)
-                    .clamp(0, double.infinity)
-                    .toDouble();
-            final monthlyInstallment = installments > 0
-                ? remainingAfterUpfront / installments
-                : remainingAfterUpfront;
-            final firstInstallment = bookingAmount;
+            final selectedTotal = _selectedPriceForTaxStatus(plot, isFiler);
+            final months = isInstallmentPlan ? installmentYears * 12 : 1;
+            final downPaymentPercent = !isInstallmentPlan
+                ? 100
+                : installmentYears == 3
+                ? 20
+                : installmentYears == 2
+                ? 40
+                : 60;
+            final bookingAmount = selectedTotal * (downPaymentPercent / 100);
+            final remainingAfterUpfront = (selectedTotal - bookingAmount)
+                .clamp(0, double.infinity)
+                .toDouble();
+            final monthlyInstallment = isInstallmentPlan
+                ? remainingAfterUpfront / months
+                : 0.0;
+            final confirmationAmount = 0.0;
+            final isFullPayment = !isInstallmentPlan;
 
             return SafeArea(
               child: Padding(
@@ -740,14 +793,53 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Choose Payment Plan',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xFF0A2E73), Color(0xFF2F7ADB)],
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        children: [
+                          Hero(
+                            tag: paymentHeroTag,
+                            child: Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(
+                                Icons.account_balance_wallet_rounded,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'Choose Your Payment Method',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 12),
+                    const Text(
+                      'Step 1: Select Tax Status',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
                     SegmentedButton<bool>(
                       segments: const [
                         ButtonSegment<bool>(value: true, label: Text('Filer')),
@@ -760,51 +852,169 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
                       onSelectionChanged: (value) {
                         setModalState(() {
                           isFiler = value.first;
-                          installments = isFiler ? 15 : 12;
                         });
                       },
                     ),
                     const SizedBox(height: 12),
-                    Text(
-                      'Installments: $installments (Min ${isFiler ? 15 : 12}, Max $maxInstallments)',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    Slider(
-                      value: installments.toDouble(),
-                      min: minInstallments.toDouble(),
-                      max: maxInstallments.toDouble(),
-                      divisions: maxInstallments - minInstallments,
-                      label: '$installments',
-                      onChanged: (v) => setModalState(() {
-                        installments = v.round();
-                      }),
+                    const Text(
+                      'Step 2: Choose Plan',
+                      style: TextStyle(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () =>
+                                setModalState(() => isInstallmentPlan = false),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 220),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: isInstallmentPlan
+                                    ? Colors.white
+                                    : const Color(0xFFEAF2FF),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isInstallmentPlan
+                                      ? Colors.grey.shade300
+                                      : AppTheme.royalBlue,
+                                  width: isInstallmentPlan ? 1 : 1.6,
+                                ),
+                              ),
+                              child: const Column(
+                                children: [
+                                  Icon(Icons.payments_rounded),
+                                  SizedBox(height: 6),
+                                  Text(
+                                    'Full Payment',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () =>
+                                setModalState(() => isInstallmentPlan = true),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 220),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: isInstallmentPlan
+                                    ? const Color(0xFFEAF2FF)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isInstallmentPlan
+                                      ? AppTheme.royalBlue
+                                      : Colors.grey.shade300,
+                                  width: isInstallmentPlan ? 1.6 : 1,
+                                ),
+                              ),
+                              child: const Column(
+                                children: [
+                                  Icon(Icons.calendar_month_rounded),
+                                  SizedBox(height: 6),
+                                  Text(
+                                    'Installments',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 260),
+                      child: !isInstallmentPlan
+                          ? const SizedBox(height: 0)
+                          : Padding(
+                              key: const ValueKey('installment-tenure'),
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Step 3: Select Installment Tenure',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  SegmentedButton<int>(
+                                    segments: const [
+                                      ButtonSegment<int>(
+                                        value: 1,
+                                        label: Text('1 Year'),
+                                      ),
+                                      ButtonSegment<int>(
+                                        value: 2,
+                                        label: Text('2 Years'),
+                                      ),
+                                      ButtonSegment<int>(
+                                        value: 3,
+                                        label: Text('3 Years'),
+                                      ),
+                                    ],
+                                    selected: {installmentYears},
+                                    onSelectionChanged: (value) {
+                                      setModalState(() {
+                                        installmentYears = value.first;
+                                      });
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                    ),
+                    const SizedBox(height: 10),
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: AppTheme.lightBlue.withValues(alpha: 0.25),
+                        color: AppTheme.lightBlue.withValues(alpha: 0.24),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Total: ${plot.formattedPrice}'),
                           Text(
-                            'Booking ($bookingPercent%): PKR ${bookingAmount.toStringAsFixed(0)}',
-                          ),
-                          Text(
-                            'First Installment Due Now: PKR ${firstInstallment.toStringAsFixed(0)}',
+                            'Selected Price: ${_formatPkr(selectedTotal)}',
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           Text(
-                            'Confirmation ($confirmationPercent%): PKR ${confirmationAmount.toStringAsFixed(0)}',
+                            'Customer Type: ${isFiler ? 'Filer' : 'Non-Filer'}',
                           ),
                           Text(
-                            'Monthly Installment: PKR ${monthlyInstallment.toStringAsFixed(0)}',
+                            'Plan: ${isFullPayment ? 'Full Payment' : '$installmentYears Year Installments'}',
+                          ),
+                          Text(
+                            'Pay Now ($downPaymentPercent%): ${_formatPkr(bookingAmount)}',
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
+                          if (!isFullPayment)
+                            Text(
+                              'Remaining: ${_formatPkr(remainingAfterUpfront)}',
+                            ),
+                          if (!isFullPayment)
+                            Text(
+                              'Monthly Installment ($months months): ${_formatPkr(monthlyInstallment)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -817,14 +1027,20 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
                           await _startOnlinePaymentFlow(
                             plot: plot,
                             isFiler: isFiler,
-                            installments: installments,
-                            bookingAmount: firstInstallment,
+                            heroTag: paymentHeroTag,
+                            totalAmount: selectedTotal,
+                            installments: months,
+                            bookingAmount: bookingAmount,
                             confirmationAmount: confirmationAmount,
                             monthlyInstallment: monthlyInstallment,
                           );
                         },
                         icon: const Icon(Icons.arrow_forward_rounded),
-                        label: const Text('Proceed to Payment'),
+                        label: Text(
+                          isFullPayment
+                              ? 'Proceed with Full Payment'
+                              : 'Proceed with Installments',
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -840,6 +1056,7 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
 
   Future<PaymentModel?> _ensurePaymentPlan({
     required PlotModel plot,
+    required double totalAmount,
     required int installments,
     required double bookingAmount,
     required double confirmationAmount,
@@ -857,12 +1074,12 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
       clientName: FirebaseAuth.instance.currentUser?.displayName ?? 'Client',
       plotId: plot.id,
       plotDetails: '${plot.size} - ${plot.blockName} - ${plot.society}',
-      totalAmount: plot.price,
+      totalAmount: totalAmount,
       bookingAmount: bookingAmount,
       confirmationAmount: confirmationAmount,
       monthlyInstallment: monthlyInstallment,
       totalInstallments: installments,
-      remainingAmount: plot.price,
+      remainingAmount: totalAmount,
       status: 'unpaid',
       nextDueDate: DateTime(DateTime.now().year, DateTime.now().month + 1, 5),
     );
@@ -879,6 +1096,8 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
   Future<void> _startOnlinePaymentFlow({
     required PlotModel plot,
     required bool isFiler,
+    required String heroTag,
+    required double totalAmount,
     required int installments,
     required double bookingAmount,
     required double confirmationAmount,
@@ -887,6 +1106,8 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
     await _openPaymentTransactionPage(
       plot: plot,
       isFiler: isFiler,
+      heroTag: heroTag,
+      totalAmount: totalAmount,
       installments: installments,
       bookingAmount: bookingAmount,
       confirmationAmount: confirmationAmount,
@@ -898,6 +1119,8 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
   Future<void> _openPaymentTransactionPage({
     required PlotModel plot,
     required bool isFiler,
+    required String heroTag,
+    required double totalAmount,
     required int installments,
     required double bookingAmount,
     required double confirmationAmount,
@@ -906,6 +1129,7 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
   }) async {
     final payment = await _ensurePaymentPlan(
       plot: plot,
+      totalAmount: totalAmount,
       installments: installments,
       bookingAmount: bookingAmount,
       confirmationAmount: confirmationAmount,
@@ -922,33 +1146,61 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
 
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ClientManualPaymentScreen(
-          propertyId: plot.id,
-          propertyName: plot.title,
-          amount: bookingAmount,
-          linkedPaymentId: payment.id,
-          installmentNumber: payment.paidInstallments + 1,
-          installmentType: 'first_installment',
-          isOnlineFlow: initialMode == 'online',
-          initialMode: initialMode,
-          hasVoucher: true,
-          onDownloadChallan: () => _downloadVoucherForPaymentPage(
-            plot: plot,
-            isFiler: isFiler,
-            installments: installments,
-            bookingAmount: bookingAmount,
-            confirmationAmount: confirmationAmount,
-            monthlyInstallment: monthlyInstallment,
-          ),
-        ),
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 460),
+        reverseTransitionDuration: const Duration(milliseconds: 340),
+        pageBuilder: (_, animation, __) {
+          return FadeTransition(
+            opacity: animation,
+            child: ClientManualPaymentScreen(
+              propertyId: plot.id,
+              propertyName: plot.title,
+              amount: bookingAmount,
+              heroTag: heroTag,
+              linkedPaymentId: payment.id,
+              installmentNumber: payment.paidInstallments + 1,
+              installmentType: installments <= 1
+                  ? 'full_payment'
+                  : 'first_installment',
+              isOnlineFlow: initialMode == 'online',
+              initialMode: initialMode,
+              hasVoucher: true,
+              onDownloadChallan: () => _downloadVoucherForPaymentPage(
+                plot: plot,
+                isFiler: isFiler,
+                totalAmount: totalAmount,
+                installments: installments,
+                bookingAmount: bookingAmount,
+                confirmationAmount: confirmationAmount,
+                monthlyInstallment: monthlyInstallment,
+              ),
+            ),
+          );
+        },
+        transitionsBuilder: (_, animation, __, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.06),
+              end: Offset.zero,
+            ).animate(curved),
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.99, end: 1).animate(curved),
+              child: child,
+            ),
+          );
+        },
       ),
     );
   }
 
-  Future<void> _downloadVoucherForPaymentPage({
+  Future<bool> _downloadVoucherForPaymentPage({
     required PlotModel plot,
     required bool isFiler,
+    required double totalAmount,
     required int installments,
     required double bookingAmount,
     required double confirmationAmount,
@@ -964,179 +1216,467 @@ class _ClientPlotsScreenState extends State<ClientPlotsScreen> {
     final bytes = await _buildVoucherPdf(
       plot: plot,
       isFiler: isFiler,
+      totalAmount: totalAmount,
       installments: installments,
       bookingAmount: bookingAmount,
       confirmationAmount: confirmationAmount,
       monthlyInstallment: monthlyInstallment,
       paymentMethods: methods,
     );
+    return _saveAndSharePdf(bytes, 'royalnest_voucher_${plot.id}.pdf');
+  }
 
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: 'royalnest_voucher_${plot.id}.pdf',
+  Future<bool> _saveAndSharePdf(Uint8List bytes, String filename) async {
+    if (Platform.isAndroid) {
+      try {
+        await MediaStore.ensureInitialized();
+        MediaStore.appFolder = 'RoyalNest';
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/$filename');
+        await tempFile.writeAsBytes(bytes, flush: true);
+        final saved = await MediaStore().saveFile(
+          tempFilePath: tempFile.path,
+          dirType: DirType.download,
+          dirName: DirName.download,
+          relativePath: null,
+        );
+        if (saved != null) {
+          return true;
+        }
+      } catch (_) {
+        // Continue to fallback.
+      }
+    }
+    return false;
+  }
+
+  PaymentMethodModel? _pickSocietyPaymentMethod(
+    List<PaymentMethodModel> methods,
+    String societyName,
+  ) {
+    if (methods.isEmpty) return null;
+    final normalizedSociety = societyName.trim().toLowerCase();
+    final matched = methods.firstWhere(
+      (method) => method.societyName.trim().toLowerCase() == normalizedSociety,
+      orElse: () => methods.first,
     );
+    return matched;
   }
 
   Future<Uint8List> _buildVoucherPdf({
     required PlotModel plot,
     required bool isFiler,
+    required double totalAmount,
     required int installments,
     required double bookingAmount,
     required double confirmationAmount,
     required double monthlyInstallment,
     required List<PaymentMethodModel> paymentMethods,
   }) async {
+    // ── Layout constants ──────────────────────────────────────
+    // A4 landscape = 842 × 595 pt.  Margin 24 each side → 794 usable.
+    // 3 copies × 250 + 2 gaps × 12 = 774 pt  ✓  fits comfortably.
+    const double colW = 250;
+    const double colGap = 12;
+    const double pagePad = 24;
+    const double labelW = 70;
+    const double valueW = colW - labelW - 22; // 22 = cell paddings + border
+    const double innerW = colW - 16; // 8 padding × 2
+    final royalBlue = PdfColor.fromHex('#0050FF');
+    final lightBlue = PdfColor.fromHex('#E8F0FF');
+
+    // ── Data preparation ──────────────────────────────────────
     final doc = pw.Document();
     final now = DateTime.now();
     final issuedAt =
-        '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-    final voucherNumber =
+        '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
+    final dueDate = now.add(const Duration(days: 4));
+    final dueAt =
+        '${dueDate.day.toString().padLeft(2, '0')}/${dueDate.month.toString().padLeft(2, '0')}/${dueDate.year}';
+    final rawVoucher =
         'RN-${plot.id.toUpperCase()}-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
+    // Truncate long voucher IDs to prevent overflow
+    final voucherNumber = rawVoucher.length > 22
+        ? '${rawVoucher.substring(0, 22)}...'
+        : rawVoucher;
+    final isFullPayment = installments <= 1;
+    final selectedPlotPrice = _selectedPriceForTaxStatus(plot, isFiler);
 
-    doc.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.a4,
-        build: (context) {
-          pw.Widget item(String label, String value, {bool strong = false}) {
-            return pw.Padding(
-              padding: const pw.EdgeInsets.only(bottom: 8),
-              child: pw.Row(
-                children: [
-                  pw.SizedBox(
-                    width: 160,
-                    child: pw.Text(
-                      label,
-                      style: pw.TextStyle(
-                        fontSize: 11,
-                        color: PdfColors.blueGrey800,
-                      ),
-                    ),
-                  ),
-                  pw.Expanded(
-                    child: pw.Text(
-                      value,
-                      style: pw.TextStyle(
-                        fontSize: strong ? 13 : 11,
-                        fontWeight: strong
-                            ? pw.FontWeight.bold
-                            : pw.FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                ],
+    String money(double value) => 'PKR ${value.toStringAsFixed(0)}';
+    String safe(String v) => v.trim().isEmpty ? 'N/A' : v.trim();
+    final clientName = _currentUser?.username.isNotEmpty == true
+        ? _currentUser!.username
+        : (FirebaseAuth.instance.currentUser?.displayName ?? 'Client');
+    final clientEmail = _currentUser?.email.isNotEmpty == true
+        ? _currentUser!.email
+        : (FirebaseAuth.instance.currentUser?.email ?? 'N/A');
+    final method = _pickSocietyPaymentMethod(paymentMethods, plot.society);
+
+    // ── Reusable text style helpers ───────────────────────────
+    pw.TextStyle labelStyle() => pw.TextStyle(
+      fontSize: 7,
+      fontWeight: pw.FontWeight.bold,
+      color: PdfColors.grey800,
+    );
+    pw.TextStyle valueStyle() => pw.TextStyle(fontSize: 7);
+    pw.TextStyle sectionStyle() => pw.TextStyle(
+      fontSize: 7,
+      fontWeight: pw.FontWeight.bold,
+      color: royalBlue,
+    );
+
+    // ── Table row builder (fixed widths, constrained text) ────
+    pw.TableRow tableRow(String label, String value, int idx) {
+      return pw.TableRow(
+        decoration: pw.BoxDecoration(
+          color: idx.isEven ? PdfColors.white : PdfColors.grey50,
+        ),
+        children: [
+          pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(
+              vertical: 2.5,
+              horizontal: 4,
+            ),
+            child: pw.ConstrainedBox(
+              constraints: const pw.BoxConstraints(
+                maxWidth: labelW - 8,
+                minHeight: 11,
               ),
-            );
-          }
+              child: pw.Text(
+                label,
+                style: labelStyle(),
+                maxLines: 2,
+                softWrap: true,
+                overflow: pw.TextOverflow.clip,
+              ),
+            ),
+          ),
+          pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(
+              vertical: 2.5,
+              horizontal: 4,
+            ),
+            child: pw.ConstrainedBox(
+              constraints: const pw.BoxConstraints(
+                maxWidth: valueW - 8,
+                minHeight: 11,
+              ),
+              child: pw.Text(
+                value,
+                style: valueStyle(),
+                maxLines: 2,
+                softWrap: true,
+                overflow: pw.TextOverflow.clip,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
 
-          return pw.Padding(
-            padding: const pw.EdgeInsets.all(24),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Container(
-                  width: double.infinity,
-                  padding: const pw.EdgeInsets.all(14),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.blue900,
-                    borderRadius: pw.BorderRadius.circular(8),
-                  ),
-                  child: pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text(
-                        'ROYAL NEST - PAYMENT VOUCHER',
+    // ── Section header row ────────────────────────────────────
+    pw.TableRow sectionRow(String title) {
+      return pw.TableRow(
+        decoration: pw.BoxDecoration(color: lightBlue),
+        children: [
+          pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+            child: pw.Text(title, style: sectionStyle(), maxLines: 1),
+          ),
+          pw.SizedBox(),
+        ],
+      );
+    }
+
+    // ── Build one challan copy ────────────────────────────────
+    pw.Widget challanCopy(String copyTitle) {
+      // Collect all data rows
+      int rowIdx = 0;
+      final rows = <pw.TableRow>[
+        sectionRow('CHALLAN INFO'),
+        tableRow('Voucher No', voucherNumber, rowIdx++),
+        tableRow('Issue Date', issuedAt, rowIdx++),
+        tableRow('Due Date', dueAt, rowIdx++),
+        sectionRow('PROPERTY DETAILS'),
+        tableRow('Society', safe(plot.society), rowIdx++),
+        tableRow('Plot Title', safe(plot.title), rowIdx++),
+        tableRow('Plot No', safe(plot.plotNumber), rowIdx++),
+        tableRow('Block', safe(plot.blockName), rowIdx++),
+        tableRow('Type', safe(plot.plotType), rowIdx++),
+        tableRow('Size', safe(plot.size), rowIdx++),
+        tableRow('Location', safe(plot.location), rowIdx++),
+        sectionRow('CLIENT INFO'),
+        tableRow('Name', safe(clientName), rowIdx++),
+        tableRow('Email', safe(clientEmail), rowIdx++),
+        tableRow(
+          'Plan',
+          isFullPayment ? 'Full Payment' : 'Installments',
+          rowIdx++,
+        ),
+        if (!isFullPayment)
+          tableRow('Installment', '1 of $installments', rowIdx++),
+        sectionRow('PAYMENT INFO'),
+        tableRow('Plot Price', money(selectedPlotPrice), rowIdx++),
+        tableRow(
+          'Amount Due',
+          money(isFullPayment ? totalAmount : bookingAmount),
+          rowIdx++,
+        ),
+        if (!isFullPayment)
+          tableRow('Confirmation', money(confirmationAmount), rowIdx++),
+        if (!isFullPayment)
+          tableRow('Monthly', money(monthlyInstallment), rowIdx++),
+        sectionRow('BANK DETAILS'),
+      ];
+
+      if (method == null) {
+        rows.add(tableRow('Account', 'Contact admin', rowIdx++));
+      } else {
+        rows.add(tableRow('Bank', safe(method.methodName), rowIdx++));
+        rows.add(tableRow('Title', safe(method.accountTitle), rowIdx++));
+        rows.add(tableRow('Account', safe(method.accountNumber), rowIdx++));
+        if (method.bankId.isNotEmpty) {
+          rows.add(tableRow('Bank ID', safe(method.bankId), rowIdx++));
+        }
+      }
+
+      return pw.SizedBox(
+        width: colW,
+        child: pw.Container(
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: royalBlue, width: 1),
+            color: PdfColors.white,
+          ),
+          padding: const pw.EdgeInsets.all(8),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            mainAxisSize: pw.MainAxisSize.min,
+            children: [
+              // ── Header ──
+              pw.Container(
+                width: innerW,
+                padding: const pw.EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 5,
+                ),
+                decoration: pw.BoxDecoration(
+                  color: royalBlue,
+                  borderRadius: pw.BorderRadius.circular(4),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.SizedBox(
+                      width: innerW - 16,
+                      child: pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text(
+                            'ROYAL NEST',
+                            style: pw.TextStyle(
+                              color: PdfColors.white,
+                              fontWeight: pw.FontWeight.bold,
+                              fontSize: 9,
+                            ),
+                            maxLines: 1,
+                          ),
+                          pw.Text(
+                            copyTitle,
+                            style: pw.TextStyle(
+                              color: PdfColors.white,
+                              fontSize: 7,
+                            ),
+                            maxLines: 1,
+                          ),
+                        ],
+                      ),
+                    ),
+                    pw.SizedBox(height: 2),
+                    pw.SizedBox(
+                      width: innerW - 16,
+                      child: pw.Text(
+                        'PAYMENT CHALLAN / VOUCHER SLIP',
                         style: pw.TextStyle(
                           color: PdfColors.white,
-                          fontWeight: pw.FontWeight.bold,
-                          fontSize: 14,
+                          fontSize: 7,
+                        ),
+                        maxLines: 1,
+                        softWrap: true,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 6),
+
+              // ── Data table ──
+              pw.Table(
+                border: pw.TableBorder.all(
+                  color: PdfColors.grey300,
+                  width: 0.3,
+                ),
+                columnWidths: {
+                  0: const pw.FixedColumnWidth(labelW),
+                  1: const pw.FixedColumnWidth(valueW),
+                },
+                children: rows,
+              ),
+              pw.SizedBox(height: 6),
+
+              // ── Instructions ──
+              pw.Container(
+                width: innerW,
+                padding: const pw.EdgeInsets.all(5),
+                decoration: pw.BoxDecoration(
+                  color: lightBlue,
+                  borderRadius: pw.BorderRadius.circular(3),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.SizedBox(
+                      width: innerW - 10,
+                      child: pw.Text(
+                        'Instructions:',
+                        style: sectionStyle(),
+                        maxLines: 1,
+                      ),
+                    ),
+                    pw.SizedBox(height: 2),
+                    pw.SizedBox(
+                      width: innerW - 10,
+                      child: pw.Text(
+                        '1. Verify details and Bank ID before paying.',
+                        style: pw.TextStyle(fontSize: 6),
+                        maxLines: 2,
+                        softWrap: true,
+                        overflow: pw.TextOverflow.clip,
+                      ),
+                    ),
+                    pw.SizedBox(
+                      width: innerW - 10,
+                      child: pw.Text(
+                        '2. Keep bank copy and receipt together.',
+                        style: pw.TextStyle(fontSize: 6),
+                        maxLines: 2,
+                        softWrap: true,
+                        overflow: pw.TextOverflow.clip,
+                      ),
+                    ),
+                    pw.SizedBox(
+                      width: innerW - 10,
+                      child: pw.Text(
+                        '3. Upload payment proof after deposit.',
+                        style: pw.TextStyle(fontSize: 6),
+                        maxLines: 2,
+                        softWrap: true,
+                        overflow: pw.TextOverflow.clip,
+                      ),
+                    ),
+                    if (plot.description.trim().isNotEmpty)
+                      pw.SizedBox(
+                        width: innerW - 10,
+                        child: pw.Text(
+                          '4. Notes: ${plot.description.trim()}',
+                          style: pw.TextStyle(fontSize: 6),
+                          maxLines: 2,
+                          softWrap: true,
+                          overflow: pw.TextOverflow.clip,
                         ),
                       ),
-                      pw.Text(
-                        voucherNumber,
-                        style: const pw.TextStyle(
-                          color: PdfColors.white,
-                          fontSize: 10,
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 8),
+
+              // ── Signatures ──
+              pw.SizedBox(
+                width: innerW,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Container(
+                          width: 50,
+                          height: 0.7,
+                          color: PdfColors.black,
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                pw.SizedBox(height: 16),
-                item('Issued At', issuedAt),
-                item('Plot', plot.title),
-                item('Plot ID', plot.id),
-                item('Society', plot.society),
-                item(
-                  'Client Name',
-                  _currentUser?.username.isNotEmpty == true
-                      ? _currentUser!.username
-                      : (FirebaseAuth.instance.currentUser?.displayName ??
-                            'Client'),
-                ),
-                item(
-                  'Client Email',
-                  _currentUser?.email.isNotEmpty == true
-                      ? _currentUser!.email
-                      : (FirebaseAuth.instance.currentUser?.email ?? 'N/A'),
-                ),
-                item('Customer Type', isFiler ? 'Filer' : 'Non-Filer'),
-                item('Selected Installments', '$installments Months'),
-                pw.Divider(color: PdfColors.grey400),
-                pw.Text(
-                  'Admin Payment Channels',
-                  style: pw.TextStyle(
-                    fontWeight: pw.FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-                pw.SizedBox(height: 6),
-                if (paymentMethods.isEmpty)
-                  item(
-                    'Account Details',
-                    'Will be provided in app payment methods',
-                  )
-                else
-                  ...paymentMethods
-                      .take(4)
-                      .map(
-                        (method) => item(
-                          method.methodName,
-                          '${method.accountTitle} - ${method.accountNumber}',
+                        pw.SizedBox(height: 2),
+                        pw.Text(
+                          'Client Signature',
+                          style: pw.TextStyle(fontSize: 6),
+                          maxLines: 1,
                         ),
-                      ),
-                pw.Divider(color: PdfColors.grey400),
-                item(
-                  'Total Plot Price',
-                  'PKR ${plot.price.toStringAsFixed(0)}',
+                      ],
+                    ),
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Container(
+                          width: 50,
+                          height: 0.7,
+                          color: PdfColors.black,
+                        ),
+                        pw.SizedBox(height: 2),
+                        pw.Text(
+                          'Cashier Signature',
+                          style: pw.TextStyle(fontSize: 6),
+                          maxLines: 1,
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                item(
-                  'First Installment (Pay Now)',
-                  'PKR ${bookingAmount.toStringAsFixed(0)}',
-                  strong: true,
+              ),
+              pw.SizedBox(height: 3),
+              pw.SizedBox(
+                width: innerW,
+                child: pw.Text(
+                  'Pay within 3-4 days. Keep this copy safe.',
+                  style: pw.TextStyle(fontSize: 6, color: PdfColors.grey600),
+                  maxLines: 1,
+                  softWrap: true,
                 ),
-                item(
-                  'Confirmation Amount',
-                  'PKR ${confirmationAmount.toStringAsFixed(0)}',
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ── Build page (A4 LANDSCAPE for proper fit) ──────────────
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4.landscape,
+        margin: const pw.EdgeInsets.all(pagePad),
+        build: (context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.SizedBox(
+                width: colW * 3 + colGap * 2,
+                child: pw.Text(
+                  'Print this challan and deposit at your bank branch. Keep your copy for record.',
+                  style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+                  maxLines: 1,
+                  softWrap: true,
                 ),
-                item(
-                  'Monthly Installment',
-                  'PKR ${monthlyInstallment.toStringAsFixed(0)}',
-                ),
-                pw.SizedBox(height: 18),
-                pw.Container(
-                  width: double.infinity,
-                  padding: const pw.EdgeInsets.all(12),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.grey100,
-                    borderRadius: pw.BorderRadius.circular(6),
-                  ),
-                  child: pw.Text(
-                    'Instructions: Pay only the First Installment amount shown above, then upload your paid receipt screenshot in the app from Manual Payment screen. Admin will verify and confirm your installment.',
-                    style: const pw.TextStyle(fontSize: 10),
-                  ),
-                ),
-              ],
-            ),
+              ),
+              pw.SizedBox(height: 8),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  challanCopy('Customer Copy'),
+                  pw.SizedBox(width: colGap),
+                  challanCopy('Office Copy'),
+                  pw.SizedBox(width: colGap),
+                  challanCopy('Bank Copy'),
+                ],
+              ),
+            ],
           );
         },
       ),

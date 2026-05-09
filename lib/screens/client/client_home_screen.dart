@@ -344,6 +344,65 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
   }
 
   Widget _buildQuickStats() {
+    final actions = <_OverviewAction>[
+      _OverviewAction(
+        label: 'My Plots',
+        value: _isStatsLoading ? null : '$_plotCount',
+        icon: Icons.landscape_outlined,
+        color: const Color(0xFF1F6FEB),
+        route: '/client-plots',
+      ),
+      _OverviewAction(
+        label: 'Open Queries',
+        value: _isStatsLoading ? null : '$_openQueries',
+        icon: Icons.help_outline,
+        color: const Color(0xFFE67E22),
+        route: '/client-queries',
+      ),
+      _OverviewAction(
+        label: 'Appointments',
+        value: _isStatsLoading ? null : '$_appointments',
+        icon: Icons.event_available_outlined,
+        color: const Color(0xFF6C5CE7),
+        route: '/client-appointments',
+      ),
+      _OverviewAction(
+        label: 'Payments',
+        value: _isStatsLoading ? null : 'Open',
+        icon: Icons.payments_outlined,
+        color: const Color(0xFF2D9C5B),
+        route: '/client-payments',
+      ),
+      _OverviewAction(
+        label: 'Documents',
+        value: _isStatsLoading ? null : 'Upload',
+        icon: Icons.folder_open_outlined,
+        color: const Color(0xFF0F7DA0),
+        route: '/client-documents',
+      ),
+      _OverviewAction(
+        label: 'Lost & Found',
+        value: _isStatsLoading ? null : 'Open',
+        icon: Icons.search,
+        color: const Color(0xFF16A085),
+        route: '/client-lost-found',
+      ),
+      _OverviewAction(
+        label: 'Notifications',
+        value: _isStatsLoading ? null : 'View',
+        icon: Icons.notifications_none,
+        color: const Color(0xFFEB5757),
+        route: '/client-notifications',
+      ),
+      _OverviewAction(
+        label: 'Profile',
+        value: _isStatsLoading ? null : 'Manage',
+        icon: Icons.person_outline,
+        color: const Color(0xFF3D5AFE),
+        route: '/client-profile',
+      ),
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -351,118 +410,38 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
           'Overview',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
-        const SizedBox(height: 12),
-        if (_isUsingCachedStats)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              'Showing cached data. Refreshing...',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade600,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+        const SizedBox(height: 6),
+        Text(
+          _isUsingCachedStats
+              ? 'Refreshing latest stats...'
+              : 'Quick actions across your account',
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey.shade600,
+            fontWeight: FontWeight.w500,
           ),
-        Row(
-          children: [
-            Expanded(
-              child: _isStatsLoading
-                  ? _buildStatSkeletonCard()
-                  : _buildStatCard(
-                      icon: Icons.landscape,
-                      label: 'My Plots',
-                      value: '$_plotCount',
-                      color: Colors.blue,
-                      onTap: () =>
-                          Navigator.pushNamed(context, '/client-plots'),
-                    ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _isStatsLoading
-                  ? _buildStatSkeletonCard()
-                  : _buildStatCard(
-                      icon: Icons.help_outline,
-                      label: 'Open Queries',
-                      value: '$_openQueries',
-                      color: Colors.orange,
-                      onTap: () =>
-                          Navigator.pushNamed(context, '/client-queries'),
-                    ),
-            ),
-          ],
         ),
         const SizedBox(height: 12),
-        _isStatsLoading
-            ? _buildStatSkeletonCard()
-            : _buildStatCard(
-                icon: Icons.calendar_today,
-                label: 'Appointments',
-                value: '$_appointments',
-                color: Colors.purple,
-                onTap: () =>
-                    Navigator.pushNamed(context, '/client-appointments'),
-              ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _buildStatCard(
-                icon: Icons.search,
-                label: 'Lost & Found',
-                value: 'Open',
-                color: Colors.teal,
-                onTap: () => Navigator.pushNamed(context, '/client-lost-found'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildStatCard(
-                icon: Icons.upload_file,
-                label: 'Doc Upload',
-                value: 'Open',
-                color: AppTheme.royalBlue,
-                onTap: () => Navigator.pushNamed(context, '/client-documents'),
-              ),
-            ),
-          ],
-        ),
+        _buildOverviewGrid(actions),
       ],
     );
   }
 
-  Widget _buildStatSkeletonCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppTheme.mediumRadius),
-        boxShadow: AppTheme.lightShadow,
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(width: 34, height: 16, color: Colors.grey.shade200),
-                const SizedBox(height: 8),
-                Container(width: 66, height: 10, color: Colors.grey.shade100),
-              ],
-            ),
-          ),
-        ],
-      ),
+  Widget _buildOverviewGrid(List<_OverviewAction> actions) {
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: actions.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final action = actions[index];
+        return _OverviewActionTile(
+          action: action,
+          index: index,
+          isLoading: _isStatsLoading,
+          onTap: () => Navigator.pushNamed(context, action.route),
+        );
+      },
     );
   }
 
@@ -501,57 +480,6 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
             fontSize: 18,
             fontWeight: FontWeight.w800,
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatCard({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-    VoidCallback? onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.mediumRadius),
-          boxShadow: AppTheme.lightShadow,
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: color, size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    value,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    label,
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -691,6 +619,264 @@ class _EntranceRevealState extends State<_EntranceReveal> {
         curve: Curves.easeOut,
         opacity: _visible ? 1 : 0,
         child: widget.child,
+      ),
+    );
+  }
+}
+
+class _ShimmerBox extends StatefulWidget {
+  const _ShimmerBox({
+    required this.width,
+    required this.height,
+    this.radius = 8,
+  });
+
+  final double width;
+  final double height;
+  final double radius;
+
+  @override
+  State<_ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<_ShimmerBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (_, __) {
+        final t = _controller.value;
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(widget.radius),
+            gradient: LinearGradient(
+              begin: Alignment(-1 + (2 * t), -0.2),
+              end: Alignment(1 + (2 * t), 0.2),
+              colors: [
+                Colors.grey.shade200,
+                Colors.grey.shade100,
+                Colors.grey.shade200,
+              ],
+              stops: const [0.15, 0.5, 0.85],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _OverviewAction {
+  const _OverviewAction({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+    required this.route,
+  });
+
+  final String label;
+  final String? value;
+  final IconData icon;
+  final Color color;
+  final String route;
+}
+
+class _OverviewActionTile extends StatefulWidget {
+  const _OverviewActionTile({
+    required this.action,
+    required this.index,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  final _OverviewAction action;
+  final int index;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  @override
+  State<_OverviewActionTile> createState() => _OverviewActionTileState();
+}
+
+class _OverviewActionTileState extends State<_OverviewActionTile> {
+  bool _visible = false;
+  bool _hovered = false;
+  bool _pressed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration(milliseconds: 140 + widget.index * 60), () {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.isLoading) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: AppTheme.lightShadow,
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            _ShimmerBox(width: 34, height: 34, radius: 12),
+            SizedBox(height: 10),
+            _ShimmerBox(width: 56, height: 10, radius: 6),
+            SizedBox(height: 6),
+            _ShimmerBox(width: 40, height: 10, radius: 6),
+          ],
+        ),
+      );
+    }
+
+    final action = widget.action;
+    final isInteractive = !_pressed && !_hovered;
+    final shadowColor = action.color.withValues(alpha: 0.18);
+    final baseShadow = BoxShadow(
+      color: Colors.black.withValues(alpha: 0.08),
+      blurRadius: 14,
+      offset: const Offset(0, 8),
+    );
+    final liftedShadow = BoxShadow(
+      color: shadowColor,
+      blurRadius: 20,
+      offset: const Offset(0, 12),
+    );
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      opacity: _visible ? 1 : 0,
+      child: AnimatedSlide(
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+        offset: _visible ? Offset.zero : const Offset(0, 0.08),
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: GestureDetector(
+            onTapDown: (_) => setState(() => _pressed = true),
+            onTapUp: (_) => setState(() => _pressed = false),
+            onTapCancel: () => setState(() => _pressed = false),
+            child: AnimatedScale(
+              scale: _pressed
+                  ? 0.98
+                  : _hovered
+                  ? 1.03
+                  : 1.0,
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOut,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOut,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  color: Colors.white,
+                  border: Border.all(
+                    color: action.color.withValues(
+                      alpha: _hovered ? 0.35 : 0.2,
+                    ),
+                  ),
+                  boxShadow: [isInteractive ? baseShadow : liftedShadow],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: widget.onTap,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: action.color.withValues(
+                                alpha: _hovered ? 0.18 : 0.12,
+                              ),
+                              shape: BoxShape.circle,
+                              boxShadow: _hovered
+                                  ? [
+                                      BoxShadow(
+                                        color: shadowColor,
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 6),
+                                      ),
+                                    ]
+                                  : [],
+                            ),
+                            child: Icon(
+                              action.icon,
+                              color: action.color,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  action.label,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  action.value ?? '...',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey.shade600,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right,
+                            size: 20,
+                            color: Colors.grey.shade400,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

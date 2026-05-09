@@ -9,11 +9,26 @@ service firebase.storage {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isAdminEmail() {
+      return isSignedIn() && (
+        request.auth.token.email == 'admin17@gmail.com' ||
+        request.auth.token.email == 'admin@royalnest.com' ||
+        request.auth.token.email == 'admin@gmail.com' ||
+        request.auth.token.email == 'superadmin@royalnest.com'
+      );
+    }
+
     // Manual payment proof uploads.
     // Clients can upload and read their own files; admins can read all.
     match /payment_proofs/{userId}/{propertyId}/{fileName} {
       allow create, update, delete: if isOwner(userId);
-      allow read: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdminEmail();
+    }
+
+    // Document verification uploads.
+    match /verification_documents/{userId}/{fileName} {
+      allow create, update, delete: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdminEmail();
     }
   }
 }

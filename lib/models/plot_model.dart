@@ -14,6 +14,8 @@ class PlotModel {
   final String location;
   final String description;
   final String status; // available, sold, reserved
+  final double? filerPrice;
+  final double? nonFilerPrice;
   final String? ownerId; // Client ID who owns/bought the plot
   final String? ownerName;
   final DateTime? createdAt;
@@ -31,6 +33,8 @@ class PlotModel {
     required this.location,
     required this.description,
     this.status = 'available',
+    this.filerPrice,
+    this.nonFilerPrice,
     this.ownerId,
     this.ownerName,
     this.createdAt,
@@ -48,6 +52,16 @@ class PlotModel {
   }
 
   factory PlotModel.fromMap(Map<String, dynamic> map, String docId) {
+    double? readNullablePrice(dynamic value) {
+      if (value == null) return null;
+      if (value is num) return value.toDouble();
+      final raw = value.toString().trim();
+      if (raw.isEmpty) return null;
+      final sanitized = raw.replaceAll(RegExp(r'[^0-9.\-]'), '');
+      if (sanitized.isEmpty) return null;
+      return double.tryParse(sanitized);
+    }
+
     return PlotModel(
       id: docId,
       title: map['title'] ?? '',
@@ -57,6 +71,10 @@ class PlotModel {
       blockName: map['blockName'] ?? '',
       plotType: map['plotType'] ?? 'Residential',
       price: (map['price'] ?? 0).toDouble(),
+      filerPrice: readNullablePrice(map['filerPrice'] ?? map['filer_price']),
+      nonFilerPrice: readNullablePrice(
+        map['nonFilerPrice'] ?? map['non_filer_price'],
+      ),
       location: map['location'] ?? '',
       description: map['description'] ?? '',
       status: map['status'] ?? 'available',
@@ -76,6 +94,8 @@ class PlotModel {
       'blockName': blockName,
       'plotType': plotType,
       'price': price,
+      'filerPrice': filerPrice,
+      'nonFilerPrice': nonFilerPrice,
       'location': location,
       'description': description,
       'status': status,
@@ -97,6 +117,8 @@ class PlotModel {
     String? blockName,
     String? plotType,
     double? price,
+    double? filerPrice,
+    double? nonFilerPrice,
     String? location,
     String? description,
     String? status,
@@ -114,6 +136,8 @@ class PlotModel {
       blockName: blockName ?? this.blockName,
       plotType: plotType ?? this.plotType,
       price: price ?? this.price,
+      filerPrice: filerPrice ?? this.filerPrice,
+      nonFilerPrice: nonFilerPrice ?? this.nonFilerPrice,
       location: location ?? this.location,
       description: description ?? this.description,
       status: status ?? this.status,

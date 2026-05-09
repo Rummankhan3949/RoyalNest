@@ -31,6 +31,7 @@ class PaymentPredictionService {
       int unpaid = 0;
       int partial = 0;
       int paid = 0;
+      int totalPaidInstallments = 0;
 
       for (final payment in clientPayments) {
         remainingBalance += payment.remainingAmount;
@@ -43,12 +44,19 @@ class PaymentPredictionService {
           unpaid++;
         }
 
+        totalPaidInstallments += payment.paidInstallments;
+
         latePayments += _estimateLatePayments(payment, now);
 
         final delay = _estimateDelayDays(payment, now);
         if (delay > 0) {
           delays.add(delay);
         }
+      }
+
+      // Critical guard: no prediction before first paid installment.
+      if (totalPaidInstallments < 1) {
+        continue;
       }
 
       final delayDays = delays.isEmpty
